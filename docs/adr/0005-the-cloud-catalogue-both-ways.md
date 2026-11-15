@@ -1,6 +1,6 @@
 # ADR-0005: The digitalhome.cloud catalogue, both ways
 
-**Status:** accepted · **Date:** 2026-11-15
+**Status:** superseded by [ADR-0006](0006-partner-catalogues-are-marketplace-graphs.md) (same day, before it was used) · **Date:** 2026-11-15
 
 ## Context
 

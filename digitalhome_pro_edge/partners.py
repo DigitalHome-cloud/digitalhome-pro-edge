@@ -38,7 +38,7 @@ from .edge import cloud
 from .edge import knowledge as kn
 
 FORMATS = ("csv", "bmecat", "datanorm")
-KINDS = ("manufacturer", "distributor", "wholesaler")
+KINDS = ("manufacturer", "distributor", "wholesaler", "platform")
 _ID = re.compile(r"[a-z][a-z0-9-]{0,39}")
 
 
@@ -317,11 +317,12 @@ def partner(pid: str) -> Optional[Dict]:
 
 
 def add_partner(id: str, name: str, kind: str = "distributor", formats: Optional[List[str]] = None,  # noqa: A002
-                api: str = "", note: str = "", markets: Optional[List[str]] = None) -> Dict:
-    """Add or replace a partner in the private register."""
+                api: str = "", note: str = "", markets: Optional[List[str]] = None,
+                market: Optional[bool] = None) -> Dict:
+    """Add or replace a partner in the private register. `market`: its
+    catalogue is a seller's graph of the digitalhome.cloud marketplace, under
+    the same id (market.py); None keeps what the register says."""
     pid = _check(id)
-    if pid == "digitalhome-cloud":
-        raise ValueError("digitalhome-cloud is the synced cloud catalogue (Partners → digitalhome.cloud catalogue)")
     if kind not in KINDS:
         raise ValueError(f"kind is one of {', '.join(KINDS)}")
     formats = [f for f in (formats or ["csv"]) if f]
@@ -330,9 +331,11 @@ def add_partner(id: str, name: str, kind: str = "distributor", formats: Optional
         raise ValueError(f"unknown format {', '.join(bad)}; one of {', '.join(FORMATS)}")
     if api and api not in CONNECTORS:
         raise ValueError(f"no API connector {api}; one of {', '.join(CONNECTORS) or 'none'}")
+    before = partner(pid) or {}
     entry = {"id": pid, "name": (name or pid).strip(), "kind": kind, "formats": formats,
              "api": api, "note": (note or "").strip(),
-             "markets": sorted({m.strip().upper() for m in (markets or []) if m.strip()})}
+             "markets": sorted({m.strip().upper() for m in (markets or []) if m.strip()}),
+             "market": bool(before.get("market")) if market is None else bool(market)}
     reg = [p for p in _get_register() if p["id"] != pid] + [entry]
     _put_register(reg)
     return entry
@@ -344,6 +347,9 @@ def remove_partner(pid: str) -> Dict:
     _put_credentials(pid, None)
     (_dir() / f"{pid}.items.json").unlink(missing_ok=True)
     (_dir() / f"{pid}.catalogue.ttl").unlink(missing_ok=True)
+    for sync_dir in (_dir() / ".sync").glob("*"):               # market.py's bases, per connection
+        for f in sync_dir.glob(f"{pid}.*"):
+            f.unlink(missing_ok=True)
     return {"removed": pid}
 
 
@@ -464,10 +470,11 @@ def capability(partner_id: str) -> Dict:
         raise ValueError(f"{partner_id} is not in the partner list")
     has_api = bool(p.get("api")) and bool(_get_credentials(p["id"]))
     items = _items(p["id"])
-    use = "api" if has_api else ("file" if items else "none")
+    use = "api" if has_api else ("file" if items else ("market" if p.get("market") else "none"))
     return {"partner": p["id"], "name": p["name"], "kind": p.get("kind", ""), "use": use,
             "api": p.get("api", ""), "api_configured": has_api, "formats": p.get("formats", ["csv"]),
             "markets": p.get("markets", []),
+            "market": bool(p.get("market")),
             "note": p.get("note", ""),
             "file": ({"format": items["format"], "name": items.get("file", ""), "articles": len(items["items"]),
                       "imported": items["imported"]} if items else None)}

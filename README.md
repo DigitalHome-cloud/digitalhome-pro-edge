@@ -9,9 +9,9 @@ points in rooms. Claude proposes every change and you confirm it; the page
 shows the board, a **report** against NF C 15-100, the **materials**, and
 prints **QR labels** for the board. Product data and prices come from each
 **partner** by API or by an imported file (BMEcat, Datanorm, CSV) and stay on
-this computer. The **digitalhome.cloud device catalogue** syncs in as partner
-`digitalhome-cloud`, and a catalogue admin can publish a checked article back
-to it (Partners tab; ADR-0005).
+this computer. Partners can also be sellers of the **digitalhome.cloud
+marketplace**: their catalogues sync both ways, merged statement by statement
+like the Mediathek's A-Boxes; prices never leave (Partners tab; ADR-0006).
 
 It is the DigitalHome.Cloud edge for designers and installers; running a home
 is [digitalhome-devops-edge](https://github.com/DigitalHome-cloud/digitalhome-devops-edge).

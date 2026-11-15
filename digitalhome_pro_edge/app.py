@@ -18,10 +18,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from flask import abort, jsonify, render_template, request
+from flask import abort, jsonify, render_template, request, send_file
 
 from . import catalogue as cat
-from . import cloud_catalogue as cc
+from . import market as mk
 from . import designs as dz
 from . import homes as hm
 from . import inbox as ib
@@ -240,8 +240,9 @@ def remove(ws: str, item: str):
 # credentials and where they are stored come from the page only, and
 # credentials are never returned.
 
-# The device catalogue of digitalhome.cloud, both ways (cloud_catalogue.py,
-# ADR-0005). Sync and publish change things, so the chat only proposes them.
+# The digitalhome.cloud marketplace (market.py, ADR-0006): a partner with the
+# same id as a seller syncs its catalogue with the seller's graph. Subscribe
+# and sync change things, so the chat only proposes them.
 
 def cloud_run(fn, *args, **kwargs):
     try:
@@ -254,25 +255,40 @@ def cloud_run(fn, *args, **kwargs):
         return jsonify({"errors": [str(e)]}), 502
 
 
-@app.get("/api/cloud-catalogue")
-def cloud_catalogue():
-    q = request.args.get("q", "")
-    return cloud_run(lambda: {"state": cc.state(), "categories": cc.CATEGORIES, "power_sources": cc.POWER,
-                              "models": cc.models(q, request.args.get("limit", 50, type=int))})
+@app.get("/api/market")
+def market_sellers():
+    return cloud_run(lambda: {"sellers": mk.sellers()})
 
 
-@app.post("/api/cloud-catalogue/sync")
-def cloud_catalogue_sync():
-    return cloud_run(cc.sync, bool(body().get("full")))
+@app.post("/api/market/subscribe")
+def market_subscribe():
+    return cloud_run(mk.subscribe, str(body().get("seller", "")))
 
 
-@app.post("/api/cloud-catalogue/publish")
-def cloud_catalogue_publish():
+@app.post("/api/market/sync")
+def market_sync():
     b = body()
-    return cloud_run(cc.publish, str(b.get("partner", "")), str(b.get("reference", "")),
-                     brand=str(b.get("brand", "")), device_type=str(b.get("device_type", "")),
-                     category=str(b.get("category", "")), description=str(b.get("description", "")),
-                     power_source=str(b.get("power_source", "")))
+    resolve = b.get("resolve") or None
+    if resolve is not None and not (isinstance(resolve, dict)
+                                    and all(v in ("mine", "theirs") for v in resolve.values())):
+        return jsonify({"errors": ["resolve maps a conflict's key to \"mine\" or \"theirs\""]}), 400
+    return cloud_run(mk.sync, str(b.get("partner", "")), resolve)
+
+
+@app.post("/api/partners/<partner>/articles/file")
+def partner_article_file(partner: str):
+    f = request.files.get("file")
+    if f is None:
+        return jsonify({"errors": ["send a file"]}), 400
+    return run(mk.attach, partner, request.form.get("reference", ""), f.read(mk.MAX_FILE + 1), f.filename or "")
+
+
+@app.get("/api/market/files/<name>")
+def market_file(name: str):
+    path = mk.file_path(name)
+    if path is None:
+        abort(404)
+    return send_file(path, max_age=31536000)
 
 
 @app.get("/api/partners")
@@ -292,7 +308,7 @@ def remove_partner(partner: str):
 
 @app.get("/api/partners/<partner>/catalogue.ttl")
 def partner_catalogue(partner: str):
-    if partner != cc.PARTNER and pt.partner(partner) is None:
+    if pt.partner(partner) is None:
         abort(404)
     return app.response_class(cat.turtle(partner), mimetype="text/turtle")
 

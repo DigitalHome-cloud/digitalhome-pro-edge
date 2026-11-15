@@ -44,6 +44,9 @@ SINGLE_VALUED: List[str] = [
     _DHP + "reference", _DHC + "ratedCurrent", _DHC + "crossSection", _DHC + "sensitivityMA",
     _DHC + "rcdType", _DHC + "maxPoints", _DHC + "hasCircuitType",
     "https://w3id.org/rec#locatedIn",
+    # an article of a partner's / seller's catalogue (market.py, ADR-0006)
+    _DHP + "partner", _DHP + "brand", _DHP + "deviceType", _DHP + "category", _DHP + "powerSource",
+    _DHP + "voltageV", _DHP + "currentA", _DHP + "powerW", _DHP + "ean", _DHP + "etimClass",
 ]
 # Facts that are single per LANGUAGE (one label per language).
 PER_LANGUAGE: List[str] = [
@@ -68,8 +71,7 @@ CHAT_ALLOWED: List[Tuple[str, str]] = [
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}/(place|rename|reference)"),
     ("DELETE", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}"),
     ("POST", r"/api/partners"),
-    ("POST", r"/api/cloud-catalogue/sync"),
-    ("POST", r"/api/cloud-catalogue/publish"),
+    ("POST", r"/api/market/(subscribe|sync)"),
     ("POST", r"/api/partners/[a-z][a-z0-9-]{0,39}/article"),
     ("POST", r"/api/inbox/in-[0-9a-f]{10}/import-partner"),
     # never here: partner file imports, credentials and the store, which come from the page only

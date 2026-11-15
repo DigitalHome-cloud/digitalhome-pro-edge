@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import urllib.parse
+from typing import Dict, Optional
 
 from mcp.server.mcpserver import MCPServer
 
@@ -159,38 +160,34 @@ def import_file_to_partner(file: str, partner: str, fmt: str = "") -> dict:
 
 
 @server.tool()
-def cloud_catalogue(query: str = "", limit: int = 50) -> dict:
-    """The device catalogue of digitalhome.cloud as last synced to this edge
-    (partner "digitalhome-cloud"): when it was synced, from which connection,
-    and the models matching `query` (model number, label, brand, device
-    type). Use partner "digitalhome-cloud" and a model number like any
-    article."""
-    return _get(f"/api/cloud-catalogue?q={_q(query)}&limit={int(limit)}")
+def market_sellers() -> dict:
+    """The sellers of the digitalhome.cloud marketplace (manufacturers,
+    distributors, wholesalers, and digitalhome-cloud, the platform's curated
+    catalogue): their catalogue version and size, whether each is a partner
+    here (subscribed), when it was last synced, and whether the person who
+    linked this edge may edit it (mayEdit). A subscribed seller is a partner
+    with the same id: use it like any partner."""
+    return _get("/api/market")
 
 
 @server.tool()
-def sync_cloud_catalogue(full: bool = False) -> dict:
-    """Propose fetching the models changed on digitalhome.cloud since the last
-    sync (full=true: all of them again)."""
-    return act("Sync the digitalhome.cloud catalogue" + (" (all models)" if full else ""), "POST",
-               "/api/cloud-catalogue/sync", {"full": bool(full)})
+def subscribe_to_seller(seller: str) -> dict:
+    """Propose taking a marketplace seller as a partner here, and syncing its
+    catalogue once."""
+    return act(f"Subscribe to {seller} in the digitalhome.cloud marketplace", "POST",
+               "/api/market/subscribe", {"seller": seller})
 
 
 @server.tool()
-def publish_to_cloud_catalogue(partner: str, reference: str, brand: str, device_type: str,
-                               category: str = "", description: str = "", power_source: str = "") -> dict:
-    """Propose publishing one article of a partner's catalogue to the
-    digitalhome.cloud catalogue, as a device model: its reference becomes the
-    model number, its markets the region, its standards the standards. Give a
-    brand and a device type (e.g. "Hager", "RCD"); category one of
-    COMPUTING_IT, CONTROLLERS_AUTOMATION, FACILITIES_APPLIANCES,
-    MEDIA_COMMUNICATION, SECURITY_MONITORING; power source FIXED, SOCKET,
-    BATTERY or ACCU. No price is ever sent. The cloud accepts it only when
-    the person who linked this edge is a catalogue admin."""
-    return act(f"Publish {partner} {reference} to the digitalhome.cloud catalogue", "POST",
-               "/api/cloud-catalogue/publish",
-               _clean(partner=partner, reference=reference, brand=brand, device_type=device_type,
-                      category=category, description=description, power_source=power_source))
+def sync_with_market(partner: str, resolve: Optional[Dict[str, str]] = None) -> dict:
+    """Propose syncing a partner's catalogue with its marketplace seller:
+    changes on both sides are merged statement by statement. If the result
+    lists conflicts (one fact, two values), ask the person and propose again
+    with `resolve`: {conflict key: "mine" | "theirs"}. Changes made here are
+    pushed only when the person who linked this edge is the seller's editor;
+    otherwise they stay on this edge. Prices never leave."""
+    return act(f"Sync {partner} with the marketplace", "POST", "/api/market/sync",
+               _clean(partner=partner, resolve=resolve))
 
 
 @server.tool()

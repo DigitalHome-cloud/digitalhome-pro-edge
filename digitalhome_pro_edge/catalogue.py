@@ -36,7 +36,10 @@ from .edge import settings
 
 DHC = Namespace("https://digitalhome.cloud/ontology#")
 DHP = Namespace("https://digitalhome.cloud/pro#")
-BASE = "https://digitalhome.cloud/catalogue/"
+# Articles are named as in the digitalhome.cloud marketplace (ADR-0006), so a
+# partner's catalogue and its seller's graph there are the same statements.
+BASE = "https://digitalhome.cloud/id/market/"
+OLD_BASE = "https://digitalhome.cloud/catalogue/"           # before ADR-0006; rewritten on load
 EU = {"AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT",
       "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"}
 
@@ -56,6 +59,12 @@ def load(partner: str) -> Graph:
     p = _path(partner)
     if p.exists():
         g.parse(p, format="turtle")
+        old = [t for t in g if str(t[0]).startswith(OLD_BASE)]
+        if old:
+            for s, pr, o in old:
+                g.remove((s, pr, o))
+                g.add((URIRef(BASE + str(s)[len(OLD_BASE):]), pr, o))
+            _save(partner, g)
     return g
 
 

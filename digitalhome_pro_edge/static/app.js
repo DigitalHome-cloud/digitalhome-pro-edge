@@ -180,6 +180,9 @@ async function drawPartners() {
         <input type="text" name="customer_id" placeholder="customer id">
         <button>${p.api_configured ? "Replace" : "Use the API"}</button>
         ${p.api_configured ? '<button type="button" class="forget">Forget</button>' : ""}</form>` : ""}
+      ${p.market ? `<form class="attach"><input type="text" name="reference" placeholder="reference" required>
+        <input type="file" name="file" accept=".jpg,.jpeg,.png,.webp,.pdf" required>
+        <button>Add image / datasheet</button></form>` : ""}
       <button type="button" class="drop danger">Remove partner</button>
     </section>`).join("") + `
     <details class="partner"><summary>Add a partner</summary>
@@ -190,10 +193,11 @@ async function drawPartners() {
         ${got.formats.map((f) => `<label><input type="checkbox" name="formats" value="${esc(f)}" ${f === "csv" ? "checked" : ""}> ${esc(f)}</label>`).join("")}
         <select name="api"><option value="">no API</option>${got.connectors.map((c) => `<option>${esc(c)}</option>`).join("")}</select>
         <button class="primary">Add</button></form></details>
-    <details class="partner cloud-cat"><summary>digitalhome.cloud catalogue</summary><div class="cc"></div></details>`;
+    <details class="partner market" ${S.marketOpen ? "open" : ""}><summary>digitalhome.cloud marketplace</summary><div class="mk"></div></details>`;
   const box = $("#tab-partners");
-  const cc = box.querySelector(".cloud-cat");
-  cc.ontoggle = () => { if (cc.open && !cc.dataset.drawn) { cc.dataset.drawn = "1"; drawCloudCatalogue(cc.querySelector(".cc")); } };
+  const mkt = box.querySelector("details.market");
+  if (mkt.open) drawMarket(mkt.querySelector(".mk"));
+  mkt.ontoggle = () => { S.marketOpen = mkt.open; if (mkt.open) drawMarket(mkt.querySelector(".mk")); };
   box.querySelector("form.store").onsubmit = async (e) => {
     e.preventDefault();
     try { await core.api("POST", "/api/partners/store", { where: e.target.where.value }); core.toast("Moved"); }
@@ -216,6 +220,14 @@ async function drawPartners() {
       const res = await fetch(`/api/partners/${encodeURIComponent(p)}/import`, { method: "POST", body: new FormData(e.target) });
       const r = await res.json().catch(() => ({}));
       core.toast(res.ok ? `${r.articles} articles imported, ${r.priced} with a price` : (r.errors || ["failed"]).join("; "));
+      again();
+    };
+    const att = sec.querySelector("form.attach");
+    if (att) att.onsubmit = async (e) => {
+      e.preventDefault();
+      const res = await fetch(`/api/partners/${encodeURIComponent(p)}/articles/file`, { method: "POST", body: new FormData(att) });
+      const r = await res.json().catch(() => ({}));
+      core.toast(res.ok ? "Added; it goes to the marketplace with the next sync" : (r.errors || ["failed"]).join("; "));
       again();
     };
     sec.querySelector(".drop").onclick = async () => {
@@ -241,57 +253,70 @@ async function drawPartners() {
   });
 }
 
-// ------------------------------------------- the cloud's catalogue ----
+// ------------------------------------------------------ marketplace ----
 //
-// The device catalogue of digitalhome.cloud, both ways (ADR-0005): sync it
-// into partner "digitalhome-cloud", or publish one partner article to it.
+// The digitalhome.cloud marketplace (ADR-0006): sellers' catalogues as graphs.
+// Subscribing makes a seller a partner with the same id; Sync merges both
+// sides, and asks "mine or theirs" when one fact has two values.
 
-async function drawCloudCatalogue(box, q = "") {
-  const fail = (err) => core.toast((err.errors || ["failed"]).join("; "));
+function conflictForm(box, partner, got, again) {
+  const form = document.createElement("form");
+  form.className = "mk-conflicts";
+  form.innerHTML = `<p class="note">${esc(partner)}: the same fact was changed here and in the marketplace.
+      Choose which value to keep.</p>` +
+    got.conflicts.map((c, i) => `<fieldset><legend>${esc(c.subject.split("/").pop())} · ${esc(c.property.split("#").pop())}</legend>
+      <label><input type="radio" name="c${i}" value="mine" required> here: ${esc(c.mine.join(", "))}</label>
+      <label><input type="radio" name="c${i}" value="theirs"> marketplace: ${esc(c.theirs.join(", "))}</label></fieldset>`).join("") +
+    `<button class="primary">Sync with these choices</button>`;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const resolve = {};
+    got.conflicts.forEach((c, i) => { resolve[c.key] = form.elements[`c${i}`].value; });
+    await syncPartner(box, partner, resolve, again);
+  };
+  box.querySelector(".mk-out").replaceChildren(form);
+}
+
+async function syncPartner(box, partner, resolve, again) {
+  try {
+    const r = await core.api("POST", "/api/market/sync", { partner, resolve });
+    if (r.status === "conflict") return conflictForm(box, partner, r, again);
+    if (r.status === "invalid") {
+      box.querySelector(".mk-out").innerHTML = `<p class="note">The marketplace refused ${esc(partner)}'s catalogue:</p>
+        <ul>${r.problems.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+      return;
+    }
+    core.toast(`${partner}: ${r.pulled} in, ${r.pushed} out` + (r.local_only ? ` · ${r.local_only} kept here only` : ""));
+  } catch (err) { core.toast((err.errors || ["failed"]).join("; ")); }
+  again();
+}
+
+async function drawMarket(box) {
   let got;
-  try { got = await core.api("GET", `/api/cloud-catalogue?q=${encodeURIComponent(q)}`); }
+  try { got = await core.api("GET", "/api/market"); }
   catch (err) { box.innerHTML = `<p class="note">${esc((err.errors || ["unavailable"]).join("; "))}</p>`; return; }
-  const s = got.state || {};
-  const opts = (xs) => `<option value="">—</option>` + xs.map((x) => `<option>${esc(x)}</option>`).join("");
-  box.innerHTML = `
-    <p class="note">${s.synced_at ? `Synced ${esc(s.synced_at)} from <b>${esc(s.profile)}</b> · ${s.models} models`
-                                  : "Not synced yet."} Use partner <code>digitalhome-cloud</code> in a design like any other.</p>
-    <form class="cc-sync"><button class="primary">Sync now</button>
-      <label><input type="checkbox" name="full"> all models again</label></form>
-    <form class="cc-find"><input type="search" name="q" value="${esc(q)}" placeholder="model number, brand, type"><button>Find</button></form>
-    ${got.models.length ? `<table class="bom"><thead><tr><th>Model</th><th>Brand</th><th>Type</th><th>Markets</th></tr></thead><tbody>
-      ${got.models.map((m) => `<tr><td>${esc(m.reference)}${m.label ? ` <small>${esc(m.label)}</small>` : ""}</td>
-        <td>${esc(m.brand)}</td><td>${esc(m.deviceType)}</td><td>${esc(m.usable_in.join(", "))}</td></tr>`).join("")}
-    </tbody></table>` : (q ? `<p class="note">No model matches “${esc(q)}”.</p>` : "")}
-    <details><summary>Publish a partner article to the cloud</summary>
-      <form class="cc-pub">
-        <input type="text" name="partner" placeholder="partner id" required>
-        <input type="text" name="reference" placeholder="reference" required>
-        <input type="text" name="brand" placeholder="brand" required>
-        <input type="text" name="device_type" placeholder="device type, e.g. RCD" required>
-        <select name="category">${opts(got.categories)}</select>
-        <select name="power_source">${opts(got.power_sources)}</select>
-        <input type="text" name="description" placeholder="description (default: the article's label)">
-        <button>Publish</button></form>
-      <p class="note">No price is ever sent. The cloud accepts it only when the person who linked this edge is a
-        catalogue admin (with an authenticator app).</p></details>`;
-  box.querySelector("form.cc-sync").onsubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const r = await core.api("POST", "/api/cloud-catalogue/sync", { full: e.target.full.checked });
-      core.toast(`${r.changed} changed · ${r.models} models`);
-    } catch (err) { fail(err); }
-    drawCloudCatalogue(box, q);
-  };
-  box.querySelector("form.cc-find").onsubmit = (e) => { e.preventDefault(); drawCloudCatalogue(box, e.target.q.value); };
-  box.querySelector("form.cc-pub").onsubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const r = await core.api("POST", "/api/cloud-catalogue/publish", Object.fromEntries(new FormData(e.target)));
-      core.toast(`${r.model.modelNumber} ${r.created ? "added to" : "updated in"} the cloud catalogue`);
-    } catch (err) { fail(err); }
-    drawCloudCatalogue(box, q);
-  };
+  const again = () => { S.seen.partners = null; drawPartners(); };
+  box.innerHTML = `<p class="note">Catalogues published on digitalhome.cloud. A seller you subscribe to becomes a partner
+      with the same id. Prices never leave this computer.</p>
+    <table class="bom"><thead><tr><th>Seller</th><th class="num">Articles</th><th>Synced</th><th></th></tr></thead><tbody>
+    ${got.sellers.map((s) => `<tr data-s="${esc(s.id)}">
+      <td><b>${esc(s.name)}</b> <small>${esc(s.id)} · ${esc(s.kind)}${s.mayEdit ? " · you edit it" : ""}</small></td>
+      <td class="num">${s.articles}</td>
+      <td>${s.synced ? `v${s.synced.version} · ${esc(s.synced.synced_at)}${s.synced.local_only ? ` · ${s.synced.local_only} here only` : ""}` : ""}</td>
+      <td>${s.subscribed ? '<button type="button" class="sync">Sync</button>' : '<button type="button" class="sub">Subscribe</button>'}</td>
+    </tr>`).join("") || '<tr><td colspan="4">No sellers yet.</td></tr>'}
+    </tbody></table><div class="mk-out"></div>`;
+  box.querySelectorAll("tr[data-s]").forEach((tr) => {
+    const id = tr.dataset.s;
+    const sub = tr.querySelector(".sub");
+    if (sub) sub.onclick = async () => {
+      try { await core.api("POST", "/api/market/subscribe", { seller: id }); core.toast(`Subscribed to ${id}`); }
+      catch (err) { core.toast((err.errors || ["failed"]).join("; ")); }
+      again();
+    };
+    const sync = tr.querySelector(".sync");
+    if (sync) sync.onclick = () => syncPartner(box, id, null, again);
+  });
 }
 
 // --------------------------------------------------------------- files ----
