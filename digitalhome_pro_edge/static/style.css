@@ -1,35 +1,120 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright (C) 2026 D-LAB-5
 
-   digitalhome.pro's own styles, on top of core/static/core.css and its
-   tokens (--paper, --panel, --panel-2, --ink, --muted, --edge, --accent,
-   --danger, --warn, --mono). */
+   digitalhome.pro's own styles, on top of core/static/core.css. The look is
+   the DigitalHome.Cloud Portal's (its Overview shell: near-black green
+   panels, a green accent, IBM Plex), so the edge and the cloud read as one
+   product. Only the core tokens are redefined here; core/ is never edited.
+   Fonts: IBM Plex, SIL Open Font License 1.1 (static/fonts/OFL.txt). */
 
-.layout {
-  display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 16px;
-  max-width: 1200px; margin: 0 auto; padding: 18px 16px 60px;
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-display: swap; src: url("fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 500; font-display: swap; src: url("fonts/ibm-plex-sans-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 600 700; font-display: swap; src: url("fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: url("fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 500 600; font-display: swap; src: url("fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); }
+
+/* light: the portal's green on paper */
+:root {
+  --bg: #f3f5f3; --paper: #ffffff; --panel: #ffffff; --panel-2: #e9eeea;
+  --ink: #17201b; --muted: #5b6a61; --edge: #d3ddd6;
+  --accent: #3f8a52; --accent-ink: #ffffff;
+  --danger: #c0392b; --warn: #a86a1c; --ok: #3f8a52;
+  --cyan: #2f8aa0; --rail: #eef2ef;
+  --radius: 8px;
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
-.layout > .panel { grid-column: 1 / -1; }
-@media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+/* dark: the portal's Overview shell, as it is */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d0f0e; --paper: #111614; --panel: #111614; --panel-2: #18201c;
+    --ink: #dfe7e2; --muted: #8a958f; --edge: rgba(120, 140, 130, 0.22);
+    --accent: #6fae7e; --accent-ink: #0a0c0b;
+    --danger: #e0786b; --warn: #c9954f; --ok: #6fae7e;
+    --cyan: #62b6c9; --rail: #0a0c0b;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0f0e; --paper: #111614; --panel: #111614; --panel-2: #18201c;
+  --ink: #dfe7e2; --muted: #8a958f; --edge: rgba(120, 140, 130, 0.22);
+  --accent: #6fae7e; --accent-ink: #0a0c0b;
+  --danger: #e0786b; --warn: #c9954f; --ok: #6fae7e;
+  --cyan: #62b6c9; --rail: #0a0c0b;
+}
 
-.side h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+body { font-family: var(--font); -webkit-font-smoothing: antialiased; }
+.bar { background: var(--rail); border-bottom: 1px solid var(--edge); }
+.bar .brand { font-weight: 600; letter-spacing: 0; text-transform: none; }
+.bar .brand::before {
+  content: ""; display: inline-block; width: 22px; height: 22px; margin-right: 8px; vertical-align: -6px;
+  border-radius: 6px; background-color: var(--accent);
+  -webkit-mask: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230a0c0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 11 12 4l8 7'/%3E%3Cpath d='M6 10v9h12v-9'/%3E%3C/svg%3E");
+  background-position: center; background-size: 15px; background-repeat: no-repeat;
+}
+.bar a.btn { display: inline-flex; align-items: center; padding: 5px 12px; border: 1px solid var(--edge);
+             background: var(--panel); color: var(--ink); font-size: 13px; }
+.bar a.btn:hover { border-color: var(--accent); }
+button, a.btn { border-radius: var(--radius); font-family: var(--font); }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+select, input[type="text"], input[type="search"], input[type="number"], input[type="password"], textarea {
+  border-radius: var(--radius); font-family: var(--font);
+}
+
+/* The workbench: workspaces | the design and its outputs | the chat. The
+   design is made in the chat, so the chat sits beside it, not below. */
+.layout {
+  display: grid; grid-template-columns: 232px minmax(0, 1fr) minmax(320px, 400px);
+  grid-template-areas: "side work chat" "side conn chat";
+  grid-template-rows: auto 1fr; gap: 0 20px; min-height: calc(100vh - 52px);
+}
+.layout > .side { grid-area: side; background: var(--rail); border-right: 1px solid var(--edge); padding: 18px 14px; }
+.layout > .work { grid-area: work; padding: 18px 0 0; }
+.layout > #edge-connections { grid-area: conn; align-self: end; margin: 24px 0; }
+.layout > #edge-chat {
+  grid-area: chat; margin: 0; padding: 18px 16px; border-left: 1px solid var(--edge);
+  background: var(--rail); position: sticky; top: 0; align-self: stretch; min-height: calc(100vh - 52px);
+  max-height: 100vh; overflow-y: auto;
+}
+#edge-chat h2, #edge-connections h2 { font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
+.edge-chat__log { max-height: calc(100vh - 220px); }
+#edge-chat .edge-chat__ask { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+#edge-chat .edge-chat__ask textarea { flex: 1 1 100%; min-height: 72px; }
+.edge-link input { background: var(--paper); color: var(--ink); border: 1px solid var(--edge);
+                   border-radius: var(--radius); padding: 6px 8px; font-family: var(--font); }
+.edge-chat__proposal { border-left-color: var(--accent); background: var(--panel-2); border-radius: 0 6px 6px 0; padding: 6px 8px; }
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 220px minmax(0, 1fr); grid-template-areas: "side work" "side chat" "side conn"; }
+  .layout > #edge-chat { position: static; max-height: none; border-left: 0; background: none; padding: 18px 0; }
+}
+@media (max-width: 720px) {
+  .layout { grid-template-columns: 1fr; grid-template-areas: "side" "work" "chat" "conn"; }
+  .layout > .side { border-right: 0; border-bottom: 1px solid var(--edge); }
+  .layout > .work, .layout > #edge-connections { padding-left: 16px; padding-right: 16px; }
+}
+
+.side h3 { margin: 0 0 10px; font: 500 9.5px var(--mono); text-transform: uppercase; letter-spacing: .16em; color: var(--muted); }
 .ws-list { display: flex; flex-direction: column; gap: 4px; }
 .ws-list .home { margin: 10px 0 2px; font-size: 12px; color: var(--muted); }
 .ws-list button { display: flex; justify-content: space-between; gap: 8px; text-align: left; width: 100%; }
-.ws-list button.is-on { border-color: var(--accent); background: var(--panel-2); }
+.ws-list button { border-color: transparent; background: transparent; padding: 7px 10px; }
+.ws-list button:hover:not(:disabled) { background: var(--panel-2); border-color: transparent; }
+.ws-list button.is-on { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .ws-list small { color: var(--muted); }
 .new-ws { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
 .new-ws[open] { display: flex; }
 .new-ws label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); margin: 6px 0; }
 
 .work { min-width: 0; }
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--edge); margin-bottom: 12px; flex-wrap: wrap; }
-.tabs button { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-.tabs button.is-on { border-color: var(--accent); background: var(--panel-2); }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--edge); margin-bottom: 16px; flex-wrap: wrap; }
+.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted);
+               padding: 8px 12px; font-weight: 500; }
+.tabs button:hover:not(:disabled) { color: var(--ink); border-color: transparent; border-bottom-color: var(--edge); }
+.tabs button.is-on { color: var(--ink); border-bottom-color: var(--accent); background: transparent; }
 .tab h2 { font-size: 16px; margin: 0 0 4px; }
 .tab .sub { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
 
-.board { border: 1px solid var(--edge); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; background: var(--panel); }
+.board { border: 1px solid var(--edge); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; background: var(--panel); }
 .board > header { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .meter { height: 6px; background: var(--panel-2); border-radius: 3px; margin: 6px 0 10px; overflow: hidden; }
 .meter > i { display: block; height: 100%; background: var(--accent); }
@@ -53,7 +138,7 @@ table.bom { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.bom th, table.bom td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--edge); }
 table.bom td.num, table.bom th.num { text-align: right; font-variant-numeric: tabular-nums; }
 table.bom .missing { color: var(--muted); font-size: 11px; }
-.partner { border: 1px solid var(--edge); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.partner { border: 1px solid var(--edge); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: var(--panel); }
 .partner header { display: flex; justify-content: space-between; gap: 8px; }
 .partner .use { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border-radius: 8px; background: var(--panel-2); }
 .partner form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: 12px; }
@@ -64,8 +149,10 @@ a.btn { text-decoration: none; }
 form.store { display: flex; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 12px; }
 
 /* files given to the chat */
-.dropzone { display: block; border: 2px dashed var(--line, #bbb); border-radius: 8px; padding: 24px;
-            text-align: center; cursor: pointer; margin: 12px 0; }
-.dropzone.over { background: var(--hover, rgba(0, 0, 0, .04)); }
-table.files { width: 100%; border-collapse: collapse; }
-table.files td, table.files th { padding: 6px 8px; border-bottom: 1px solid var(--line, #ddd); text-align: left; }
+.dropzone { display: block; border: 1.5px dashed var(--edge); border-radius: 12px; padding: 28px;
+            text-align: center; cursor: pointer; margin: 12px 0; color: var(--muted); background: var(--panel); }
+.dropzone:hover, .dropzone.over { border-color: var(--accent); color: var(--ink);
+            background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+table.files { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.files td, table.files th { padding: 7px 8px; border-bottom: 1px solid var(--edge); text-align: left; }
+table.files th, table.bom th { font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
