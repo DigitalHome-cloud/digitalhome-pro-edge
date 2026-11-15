@@ -320,6 +320,8 @@ def add_partner(id: str, name: str, kind: str = "distributor", formats: Optional
                 api: str = "", note: str = "", markets: Optional[List[str]] = None) -> Dict:
     """Add or replace a partner in the private register."""
     pid = _check(id)
+    if pid == "digitalhome-cloud":
+        raise ValueError("digitalhome-cloud is the synced cloud catalogue (Partners → digitalhome.cloud catalogue)")
     if kind not in KINDS:
         raise ValueError(f"kind is one of {', '.join(KINDS)}")
     formats = [f for f in (formats or ["csv"]) if f]

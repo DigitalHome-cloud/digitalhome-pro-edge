@@ -21,6 +21,7 @@ import sys
 from flask import abort, jsonify, render_template, request
 
 from . import catalogue as cat
+from . import cloud_catalogue as cc
 from . import designs as dz
 from . import homes as hm
 from . import inbox as ib
@@ -28,6 +29,7 @@ from . import labels as lb
 from . import partners as pt
 from . import selection as sel
 from .core import server
+from .edge import cloud
 from .edge import knowledge as kn
 from .core import workspace as ws
 
@@ -238,6 +240,41 @@ def remove(ws: str, item: str):
 # credentials and where they are stored come from the page only, and
 # credentials are never returned.
 
+# The device catalogue of digitalhome.cloud, both ways (cloud_catalogue.py,
+# ADR-0005). Sync and publish change things, so the chat only proposes them.
+
+def cloud_run(fn, *args, **kwargs):
+    try:
+        return run(fn, *args, **kwargs)
+    except cloud.NotLinked as e:
+        return jsonify({"errors": [f"{e} — link this edge to digitalhome.cloud first (Connections)"]}), 409
+    except PermissionError as e:
+        return jsonify({"errors": [str(e)]}), 403
+    except cloud.CloudError as e:
+        return jsonify({"errors": [str(e)]}), 502
+
+
+@app.get("/api/cloud-catalogue")
+def cloud_catalogue():
+    q = request.args.get("q", "")
+    return cloud_run(lambda: {"state": cc.state(), "categories": cc.CATEGORIES, "power_sources": cc.POWER,
+                              "models": cc.models(q, request.args.get("limit", 50, type=int))})
+
+
+@app.post("/api/cloud-catalogue/sync")
+def cloud_catalogue_sync():
+    return cloud_run(cc.sync, bool(body().get("full")))
+
+
+@app.post("/api/cloud-catalogue/publish")
+def cloud_catalogue_publish():
+    b = body()
+    return cloud_run(cc.publish, str(b.get("partner", "")), str(b.get("reference", "")),
+                     brand=str(b.get("brand", "")), device_type=str(b.get("device_type", "")),
+                     category=str(b.get("category", "")), description=str(b.get("description", "")),
+                     power_source=str(b.get("power_source", "")))
+
+
 @app.get("/api/partners")
 def partners():
     return run(pt.capabilities)
@@ -255,7 +292,7 @@ def remove_partner(partner: str):
 
 @app.get("/api/partners/<partner>/catalogue.ttl")
 def partner_catalogue(partner: str):
-    if pt.partner(partner) is None:
+    if partner != cc.PARTNER and pt.partner(partner) is None:
         abort(404)
     return app.response_class(cat.turtle(partner), mimetype="text/turtle")
 

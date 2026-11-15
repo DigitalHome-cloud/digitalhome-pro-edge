@@ -189,8 +189,11 @@ async function drawPartners() {
         <select name="kind"><option>distributor</option><option>manufacturer</option><option>wholesaler</option></select>
         ${got.formats.map((f) => `<label><input type="checkbox" name="formats" value="${esc(f)}" ${f === "csv" ? "checked" : ""}> ${esc(f)}</label>`).join("")}
         <select name="api"><option value="">no API</option>${got.connectors.map((c) => `<option>${esc(c)}</option>`).join("")}</select>
-        <button class="primary">Add</button></form></details>`;
+        <button class="primary">Add</button></form></details>
+    <details class="partner cloud-cat"><summary>digitalhome.cloud catalogue</summary><div class="cc"></div></details>`;
   const box = $("#tab-partners");
+  const cc = box.querySelector(".cloud-cat");
+  cc.ontoggle = () => { if (cc.open && !cc.dataset.drawn) { cc.dataset.drawn = "1"; drawCloudCatalogue(cc.querySelector(".cc")); } };
   box.querySelector("form.store").onsubmit = async (e) => {
     e.preventDefault();
     try { await core.api("POST", "/api/partners/store", { where: e.target.where.value }); core.toast("Moved"); }
@@ -236,6 +239,59 @@ async function drawPartners() {
       };
     }
   });
+}
+
+// ------------------------------------------- the cloud's catalogue ----
+//
+// The device catalogue of digitalhome.cloud, both ways (ADR-0005): sync it
+// into partner "digitalhome-cloud", or publish one partner article to it.
+
+async function drawCloudCatalogue(box, q = "") {
+  const fail = (err) => core.toast((err.errors || ["failed"]).join("; "));
+  let got;
+  try { got = await core.api("GET", `/api/cloud-catalogue?q=${encodeURIComponent(q)}`); }
+  catch (err) { box.innerHTML = `<p class="note">${esc((err.errors || ["unavailable"]).join("; "))}</p>`; return; }
+  const s = got.state || {};
+  const opts = (xs) => `<option value="">—</option>` + xs.map((x) => `<option>${esc(x)}</option>`).join("");
+  box.innerHTML = `
+    <p class="note">${s.synced_at ? `Synced ${esc(s.synced_at)} from <b>${esc(s.profile)}</b> · ${s.models} models`
+                                  : "Not synced yet."} Use partner <code>digitalhome-cloud</code> in a design like any other.</p>
+    <form class="cc-sync"><button class="primary">Sync now</button>
+      <label><input type="checkbox" name="full"> all models again</label></form>
+    <form class="cc-find"><input type="search" name="q" value="${esc(q)}" placeholder="model number, brand, type"><button>Find</button></form>
+    ${got.models.length ? `<table class="bom"><thead><tr><th>Model</th><th>Brand</th><th>Type</th><th>Markets</th></tr></thead><tbody>
+      ${got.models.map((m) => `<tr><td>${esc(m.reference)}${m.label ? ` <small>${esc(m.label)}</small>` : ""}</td>
+        <td>${esc(m.brand)}</td><td>${esc(m.deviceType)}</td><td>${esc(m.usable_in.join(", "))}</td></tr>`).join("")}
+    </tbody></table>` : (q ? `<p class="note">No model matches “${esc(q)}”.</p>` : "")}
+    <details><summary>Publish a partner article to the cloud</summary>
+      <form class="cc-pub">
+        <input type="text" name="partner" placeholder="partner id" required>
+        <input type="text" name="reference" placeholder="reference" required>
+        <input type="text" name="brand" placeholder="brand" required>
+        <input type="text" name="device_type" placeholder="device type, e.g. RCD" required>
+        <select name="category">${opts(got.categories)}</select>
+        <select name="power_source">${opts(got.power_sources)}</select>
+        <input type="text" name="description" placeholder="description (default: the article's label)">
+        <button>Publish</button></form>
+      <p class="note">No price is ever sent. The cloud accepts it only when the person who linked this edge is a
+        catalogue admin (with an authenticator app).</p></details>`;
+  box.querySelector("form.cc-sync").onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await core.api("POST", "/api/cloud-catalogue/sync", { full: e.target.full.checked });
+      core.toast(`${r.changed} changed · ${r.models} models`);
+    } catch (err) { fail(err); }
+    drawCloudCatalogue(box, q);
+  };
+  box.querySelector("form.cc-find").onsubmit = (e) => { e.preventDefault(); drawCloudCatalogue(box, e.target.q.value); };
+  box.querySelector("form.cc-pub").onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await core.api("POST", "/api/cloud-catalogue/publish", Object.fromEntries(new FormData(e.target)));
+      core.toast(`${r.model.modelNumber} ${r.created ? "added to" : "updated in"} the cloud catalogue`);
+    } catch (err) { fail(err); }
+    drawCloudCatalogue(box, q);
+  };
 }
 
 // --------------------------------------------------------------- files ----

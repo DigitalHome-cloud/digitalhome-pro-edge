@@ -159,6 +159,41 @@ def import_file_to_partner(file: str, partner: str, fmt: str = "") -> dict:
 
 
 @server.tool()
+def cloud_catalogue(query: str = "", limit: int = 50) -> dict:
+    """The device catalogue of digitalhome.cloud as last synced to this edge
+    (partner "digitalhome-cloud"): when it was synced, from which connection,
+    and the models matching `query` (model number, label, brand, device
+    type). Use partner "digitalhome-cloud" and a model number like any
+    article."""
+    return _get(f"/api/cloud-catalogue?q={_q(query)}&limit={int(limit)}")
+
+
+@server.tool()
+def sync_cloud_catalogue(full: bool = False) -> dict:
+    """Propose fetching the models changed on digitalhome.cloud since the last
+    sync (full=true: all of them again)."""
+    return act("Sync the digitalhome.cloud catalogue" + (" (all models)" if full else ""), "POST",
+               "/api/cloud-catalogue/sync", {"full": bool(full)})
+
+
+@server.tool()
+def publish_to_cloud_catalogue(partner: str, reference: str, brand: str, device_type: str,
+                               category: str = "", description: str = "", power_source: str = "") -> dict:
+    """Propose publishing one article of a partner's catalogue to the
+    digitalhome.cloud catalogue, as a device model: its reference becomes the
+    model number, its markets the region, its standards the standards. Give a
+    brand and a device type (e.g. "Hager", "RCD"); category one of
+    COMPUTING_IT, CONTROLLERS_AUTOMATION, FACILITIES_APPLIANCES,
+    MEDIA_COMMUNICATION, SECURITY_MONITORING; power source FIXED, SOCKET,
+    BATTERY or ACCU. No price is ever sent. The cloud accepts it only when
+    the person who linked this edge is a catalogue admin."""
+    return act(f"Publish {partner} {reference} to the digitalhome.cloud catalogue", "POST",
+               "/api/cloud-catalogue/publish",
+               _clean(partner=partner, reference=reference, brand=brand, device_type=device_type,
+                      category=category, description=description, power_source=power_source))
+
+
+@server.tool()
 def article(partner: str, reference: str, norm: str = "") -> dict:
     """An article in a partner's catalogue: its label, the markets it is sold
     for (EU, FR …), the installation norms it is approved for and the product
