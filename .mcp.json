@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "digitalhome-pro-edge": {
+      "command": ".venv/bin/python",
+      "args": ["-m", "digitalhome_pro_edge.mcp_server"],
+      "env": {}
+    }
+  }
+}

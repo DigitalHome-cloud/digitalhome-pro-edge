@@ -1,0 +1,11 @@
+{
+  "name": "digitalhome-pro-edge",
+  "version": "0.1.0",
+  "description": "digitalhome.pro",
+  "author": {
+    "name": "D-LAB-5"
+  },
+  "homepage": "https://github.com/DigitalHome-cloud/digitalhome-pro-edge",
+  "repository": "https://github.com/DigitalHome-cloud/digitalhome-pro-edge",
+  "license": "GPL-3.0-or-later"
+}
