@@ -243,14 +243,77 @@ async function drawPartners() {
 // Files given to the chat. Dropping one makes it the chat's selection; the
 // chat reads it and proposes what to do with it (inbox.py).
 
-async function upload(file) {
+// Into the inbox; the server makes it the chat's selection. Returns its meta, or null.
+async function addFile(file) {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch("/api/inbox", { method: "POST", body: fd });
-  const r = await res.json().catch(() => ({}));
-  core.toast(res.ok ? `${r.name}: ${r.note} — ask the chat what to do with it` : (r.errors || ["failed"]).join("; "));
+  const res = await fetch("/api/inbox", { method: "POST", body: fd }).catch(() => null);
+  const r = res ? await res.json().catch(() => ({})) : {};
   S.seen.files = null;
+  if (!res || !res.ok) { core.toast(`${file.name}: ${(r.errors || ["not added"]).join("; ")}`); return null; }
+  return r;
+}
+
+async function upload(file) {
+  const r = await addFile(file);
+  if (r) core.toast(`${r.name}: ${r.note} — ask the chat what to do with it`);
   refresh();
+}
+
+// The same, from the chat: 📎 beside Ask, or a file dropped on the chat. The
+// message is started for the person ("I added …: "), who says what it is for.
+// The chat panel belongs to the edge layer (edge.js) and is redrawn, so the
+// button is put back whenever its form is new.
+async function attachToChat(files) {
+  const box = $("#edge-chat");
+  const form = box && box.querySelector(".edge-chat__ask");
+  const input = form && form.querySelector("textarea");
+  const btn = form && form.querySelector(".chat-attach");
+  if (!input || !files.length) return;
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
+  const added = [];
+  for (const f of files) { const r = await addFile(f); if (r) added.push(r); }
+  if (btn) { btn.disabled = false; btn.textContent = "📎"; }
+  if (!added.length) return;
+  const line = added.length === 1
+    ? `I added “${added[0].name}” (file ${added[0].id}, ${added[0].kind}): `
+    : `I added ${added.map((r) => `“${r.name}” (file ${r.id})`).join(", ")}: `;
+  input.value = input.value.trim() ? `${input.value.trim()}\n${line}` : line;
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  if (S.tab === "files") refresh();
+}
+
+function wireChatAttach() {
+  const box = $("#edge-chat");
+  if (!box) return;
+  const hook = () => {
+    const form = box.querySelector(".edge-chat__ask");
+    if (!form || form.querySelector(".chat-attach")) return;
+    const pick = document.createElement("input");
+    pick.type = "file"; pick.multiple = true; pick.hidden = true;
+    pick.onchange = () => { attachToChat([...pick.files]); pick.value = ""; };
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "chat-attach"; btn.textContent = "📎";
+    btn.setAttribute("aria-label", "Add a file for the chat");
+    btn.dataset.help = "Give the chat a file: a price list, a catalogue, a quote, a spreadsheet, a model. It is kept on this computer (Files) and the chat reads it. You can also drop files on the chat.";
+    btn.onclick = () => pick.click();
+    const ask = form.querySelector('button[type="submit"]');
+    form.insertBefore(btn, ask || null);
+    form.append(pick);
+  };
+  hook();
+  new MutationObserver(hook).observe(box, { childList: true, subtree: true });
+  let depth = 0;   // dragenter/leave fire for every child: count them
+  const has = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files");
+  box.addEventListener("dragenter", (e) => { if (!has(e)) return; e.preventDefault(); depth++; box.classList.add("chat-drop"); });
+  box.addEventListener("dragover", (e) => { if (has(e)) e.preventDefault(); });
+  box.addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; box.classList.remove("chat-drop"); } });
+  box.addEventListener("drop", (e) => {
+    if (!has(e)) return;
+    e.preventDefault(); depth = 0; box.classList.remove("chat-drop");
+    attachToChat([...e.dataTransfer.files]);
+  });
 }
 
 async function drawFiles() {
@@ -324,6 +387,7 @@ function wire() {
     } catch (err) { core.toast(err.errors.join("; ")); }
   };
   $("#btn-labels").onclick = () => S.ws && window.open(`/workspaces/${encodeURIComponent(S.ws)}/labels`, "_blank");
+  wireChatAttach();
   const h = hashState();
   select(h.ws, h.item);
   setInterval(() => { if (!document.hidden) refresh(); }, 4000);

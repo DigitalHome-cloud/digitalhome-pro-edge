@@ -11,8 +11,12 @@ the chat plus the ontologies (ADR-0001); a file is one more input to it.
 
 ## Decision
 
-1. **An inbox.** A file dropped on the page's Files tab is kept privately in
+1. **An inbox.** A file dropped on the page's Files tab, or given in the chat
+   itself (📎 beside Ask, or dropped on the chat), is kept privately in
    `<data>/inbox/<id>/` (0700, files 0600) and becomes the chat's selection.
+   From the chat, the message is started for the person ("I added “…” (file
+   <id>, <kind>): "); they say what it is for. Same inbox, same rules: there is
+   no second way in.
 2. **Kind from content, not name.** `inbox.detect` recognises BMEcat,
    Datanorm, article tables (CSV and XLSX, the latter read with the standard
    library), Turtle, JSON, PDFs and PDFs that read like a quote, and notes what

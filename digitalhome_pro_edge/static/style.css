@@ -156,3 +156,7 @@ form.store { display: flex; gap: 6px; align-items: center; font-size: 12px; marg
 table.files { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.files td, table.files th { padding: 7px 8px; border-bottom: 1px solid var(--edge); text-align: left; }
 table.files th, table.bom th { font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+
+/* the chat's 📎 and dropping files on it (app.js wireChatAttach) */
+.chat-attach { min-width: 2.2rem; }
+#edge-chat.chat-drop { outline: 2px dashed var(--accent, #6fae7e); outline-offset: 4px; border-radius: 8px; }
