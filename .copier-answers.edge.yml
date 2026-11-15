@@ -1,0 +1,16 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: d44f3d1
+_src_path: gh:d-lab-5/template-dlab5-edge
+cloud_name: DigitalHome.Cloud
+edge_kind: human
+env_prefix: DHPRO_EDGE
+github_org: DigitalHome-cloud
+package_name: digitalhome_pro_edge
+port: 8773
+repo_name: digitalhome-pro-edge
+space_noun: workspace
+tenant_noun: home
+title: digitalhome.pro
+tool_name: digitalhome-pro-edge
+with_mcp: true
+with_workspace: true

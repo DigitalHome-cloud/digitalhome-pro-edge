@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""The edge layer wired into the tool: its routes answer, this machine only,
+and the chat can propose only what settings allow."""
+
+from __future__ import annotations
+
+import pytest
+
+from digitalhome_pro_edge.app import app
+from digitalhome_pro_edge.edge import routes, settings
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("DHPRO_EDGE_EDGE_STATE", str(tmp_path / "cloud.json"))
+    monkeypatch.setenv("DHPRO_EDGE_EDGE_DATA", str(tmp_path / "data"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setattr(routes, "_CHAT", {})        # a fresh chat, in this test's folders
+    return app.test_client()
+
+
+def test_the_connections_answer_without_a_token(client):
+    r = client.get("/api/cloud")
+    assert r.status_code == 200
+    assert r.get_json()["linked"] is False and "device_token" not in r.get_data(as_text=True)
+
+
+def test_another_host_name_is_refused(client):
+    # DNS rebinding: a page whose own name resolves to 127.0.0.1
+    assert client.get("/api/cloud", headers={"Host": "evil.example:8773"}).status_code == 403
+    assert client.get("/api/cloud", headers={"Host": "127.0.0.1:8773"}).status_code == 200
+
+
+def test_a_write_from_another_site_is_refused(client):
+    r = client.post("/api/cloud/use", json={"profile": "prod"}, headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403
+
+
+def test_nobody_may_frame_the_page(client):
+    r = client.get("/api/cloud")
+    assert r.headers["X-Frame-Options"] == "DENY"
+
+
+def test_the_chat_proposes_only_what_settings_allow(client):
+    ok = client.post("/api/chat/proposals", json={"summary": "sync", "method": "POST", "path": "/api/knowledge/sync", "body": {}})
+    assert ok.status_code == 201
+    bad = client.post("/api/chat/proposals", json={"summary": "x", "method": "POST", "path": "/api/shutdown", "body": {}})
+    assert bad.status_code == 400
+    assert ("POST", r"/api/knowledge/sync") in settings.CHAT_ALLOWED
+
+
+def test_linking_needs_an_address(client):
+    r = client.post("/api/cloud/link", json={})
+    assert r.status_code == 400
+
+
+def test_knowledge_lists_the_local_a_boxes(client):
+    r = client.get("/api/knowledge")
+    assert r.status_code == 200 and r.get_json()["graphs"][0]["name"] == "shared"
+
+
+def test_the_panels_are_served(client):
+    js = client.get("/edge-static/edge.js")
+    assert js.status_code == 200
+    # every button says what it does, above it (core.js shows data-help), and
+    # what the person starts shows the core's loading card
+    text = js.get_data(as_text=True)
+    assert text.count('"data-help"') >= 10 and "core.busy" in text
+
+
+def test_a_confirmed_proposal_that_fails_says_why_and_the_chat_hears_it(client):
+    pid = client.post("/api/chat/proposals", json={"summary": "link", "method": "POST",
+                                                   "path": "/api/cloud/link", "body": {}}).get_json()["id"]
+    r = client.post(f"/api/chat/proposals/{pid}/confirm")
+    assert r.status_code == 502 and r.get_json()["problem"]
+    listed = {p["id"]: p for p in client.get("/api/chat/proposals").get_json()}
+    assert listed[pid]["outcome"] == "failed"
+    assert "FAILED" in routes.chat_state()[0].news()
+    assert client.post(f"/api/chat/proposals/{pid}/confirm").status_code == 409
+
+
+def test_a_proposal_from_before_a_restart_still_waits(client, monkeypatch):
+    pid = client.post("/api/chat/proposals", json={"summary": "sync", "method": "POST",
+                                                   "path": "/api/knowledge/sync", "body": {}}).get_json()["id"]
+    monkeypatch.setattr(routes, "_CHAT", {})        # the edge restarted
+    assert [p["id"] for p in client.get("/api/chat").get_json()["waiting"]] == [pid]
+
+
+def test_the_history_answers_and_an_unknown_conversation_is_404(client):
+    r = client.get("/api/chat/history")
+    assert r.status_code == 200 and r.get_json()["items"] == []
+    assert client.get("/api/chat/history/0a1b2c3d-0000-4000-8000-00000000abcd").status_code == 404
+    assert client.post("/api/chat/history/0a1b2c3d-0000-4000-8000-00000000abcd/resume").status_code == 404
