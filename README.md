@@ -46,6 +46,12 @@ Notes live in two folders: `mydocs/` for your own, which git
 ignores and which follows the working directory, and the samples that ship
 inside the package. A save goes back to the folder the note came from.
 
+Inside `mydocs/`, each workspace has its own folder (ADR-0007):
+`mydocs/<workspace>/design.ttl` and `mydocs/<workspace>/files/`, beside the
+shared `inbox/` and `partners/`. A workspace's name can be changed with
+**Rename**; its folder stays. The page is in English, German and French:
+pick the language in the header, English by default.
+
 ## Installing without a clone
 
 **A release tarball**: needs neither git nor pip.

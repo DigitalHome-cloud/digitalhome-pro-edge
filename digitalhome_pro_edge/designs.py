@@ -12,6 +12,12 @@ answered by report(): the norm shapes in edge/ontology/cbox plus a few rules
 the shapes cannot express (how many RCDs, how full the board is). A design
 that breaks a norm is saved and reported, never refused.
 
+Each workspace has its own folder under the data dir (ADR-0007):
+<data>/<workspace>/design.ttl, and <data>/<workspace>/files/ for the files
+given to the chat while it is open. WorkspaceKB is the edge layer's
+KnowledgeBase with that layout; migrate_layout() moves the old one
+(<data>/abox/<workspace>.ttl) across once.
+
 Instance IRIs follow the Designer's scheme so the cloud can read them:
 https://digitalhome.cloud/instance/{home}/{type}/{id}. Ids are minted, never
 derived from a label.
@@ -19,11 +25,14 @@ derived from a label.
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 import secrets
 import string
 from collections import Counter, defaultdict
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
@@ -69,6 +78,85 @@ class NotFound(LookupError):
     pass
 
 
+log = logging.getLogger(__name__)
+
+# folders in the data dir that are not workspaces
+RESERVED = frozenset({"abox", "inbox", "partners", "files"})
+DESIGN = "design.ttl"
+
+
+class WorkspaceKB(kn.KnowledgeBase):
+    """The edge layer's KnowledgeBase, one folder per workspace:
+    <data>/<name>/design.ttl. Everything else (validation on change, one writer
+    at a time, the sync bases in <data>/.sync/) is the edge layer's, unchanged."""
+
+    def __init__(self, directory: Optional[Path] = None):
+        super().__init__(Path(directory) if directory else kn.data_dir())
+
+    def _path(self, name: str) -> Path:
+        if not kn.GRAPH_NAME.fullmatch(name or "") or name in RESERVED:
+            raise ValueError("a workspace id is lowercase letters, digits and -, "
+                             f"and not one of {', '.join(sorted(RESERVED))}")
+        return self.dir / name / DESIGN
+
+    def graphs(self) -> List[str]:
+        names = sorted(p.parent.name for p in self.dir.glob(f"*/{DESIGN}")
+                       if p.parent.name not in RESERVED and kn.GRAPH_NAME.fullmatch(p.parent.name))
+        return sorted(names or [kn.SHARED], key=lambda n: (n != kn.SHARED, n))
+
+    def folder(self, name: str) -> Path:
+        return self._path(name).parent
+
+    def _save(self, name: str, g: Graph) -> None:
+        folder = self.folder(name)
+        self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        folder.mkdir(exist_ok=True, mode=0o700)
+        os.chmod(folder, 0o700)
+        super()._save(name, g)
+
+
+def migrate_layout(root: Optional[Path] = None) -> List[str]:
+    """Move <root>/abox/<name>.ttl to <root>/<name>/design.ttl and the sync
+    bases <root>/abox/.sync/ to <root>/.sync/. Idempotent; never overwrites."""
+    root = Path(root) if root else kn.data_dir()
+    old = root / "abox"
+    done: List[str] = []
+    if not old.is_dir():
+        return done
+    for p in sorted(old.glob("*.ttl")):
+        target = root / p.stem / DESIGN
+        if p.stem in RESERVED or not kn.GRAPH_NAME.fullmatch(p.stem) or target.exists():
+            log.warning("workspace layout: left %s where it is (%s exists or is not a workspace id)", p, target)
+            continue
+        target.parent.mkdir(exist_ok=True, mode=0o700)
+        os.replace(p, target)
+        done.append(p.stem)
+    sync_old = old / ".sync"
+    if sync_old.is_dir():
+        for f in sorted(x for x in sync_old.rglob("*") if x.is_file()):
+            dest = root / ".sync" / f.relative_to(sync_old)
+            if dest.exists():
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.replace(f, dest)
+        for d in sorted((x for x in sync_old.rglob("*") if x.is_dir()), reverse=True):
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+        try:
+            sync_old.rmdir()
+        except OSError:
+            pass
+    try:
+        old.rmdir()
+    except OSError:
+        log.warning("workspace layout: %s is not empty, kept", old)
+    if done:
+        log.info("workspace layout: moved %s into their own folders", ", ".join(done))
+    return done
+
+
 def _mint(prefix: str) -> str:
     alphabet = string.ascii_lowercase + string.digits
     return prefix + "-" + "".join(secrets.choice(alphabet) for _ in range(8))
@@ -100,7 +188,7 @@ class Designs:
     """The workspaces of this edge and the design in each."""
 
     def __init__(self, kb: Optional[kn.KnowledgeBase] = None):
-        self.kb = kb or kn.KnowledgeBase()
+        self.kb = kb or WorkspaceKB()
 
     # ------------------------------------------------------------ workspaces
 
@@ -146,7 +234,7 @@ class Designs:
             raise ValueError("a home is its SmartHome ID or a short local name: letters, digits, - and _")
         existing = set(self.kb.graphs())
         name = _slug(title)
-        while name in existing:
+        while name in existing or name in RESERVED:
             name = f"{_slug(title)[:24]}-{secrets.token_hex(2)}"
         node = _iri(home, "workspace", name)
 

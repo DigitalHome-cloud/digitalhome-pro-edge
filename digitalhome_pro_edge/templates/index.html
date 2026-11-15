@@ -5,43 +5,58 @@
     panels from the edge layer (edge.js). -#}
 
 {% block head %}
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-192.png') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+<meta name="theme-color" content="#111614">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="stylesheet" href="/edge-static/edge.css">  <!-- edge layer -->
 <script src="/edge-static/edge.js" defer></script>
 {% endblock %}
 
+{% block brand %}<span class="brand">digitalhome<span class="tld">.pro</span></span>{% endblock %}
+
 {% block toolbar %}
-  <button id="btn-labels" disabled title="print a label for every device on the boards">Labels</button>
-  <a id="btn-export" class="btn" hidden download>Export .ttl</a>
+  <button id="btn-labels" disabled title="print a label for every device on the boards" data-i18n="toolbar.labels" data-i18n-title="toolbar.labelsTitle">Labels</button>
+  <a id="btn-export" class="btn" hidden download data-i18n="toolbar.export">Export .ttl</a>
+{% endblock %}
+
+{% block toolbar_end %}
+  <label class="toggle"><span data-i18n="lang.label">language</span>
+    <select id="lang-pick">
+      <option value="en">EN</option>
+      <option value="de">DE</option>
+      <option value="fr">FR</option>
+    </select>
+  </label>
 {% endblock %}
 
 {% block main %}
 <main class="layout">
 
   <aside class="side">
-    <h3>Homes and workspaces</h3>
-    <div id="ws-list" class="ws-list"><p class="note">loading…</p></div>
+    <h3 data-i18n="side.title">Homes and workspaces</h3>
+    <div id="ws-list" class="ws-list"><p class="note" data-i18n="side.loading">loading…</p></div>
     <details class="new-ws">
-      <summary>New workspace</summary>
-      <label>Project <input id="nw-title" placeholder="e.g. New switchboard"></label>
-      <label>Home <select id="nw-home"></select></label>
-      <input id="nw-draft" type="text" placeholder="local name, e.g. rue-des-lilas" hidden>
+      <summary data-i18n="side.new">New workspace</summary>
+      <label><span data-i18n="side.project">Project</span> <input id="nw-title" placeholder="e.g. New switchboard" data-i18n-placeholder="side.projectPh"></label>
+      <label><span data-i18n="side.home">Home</span> <select id="nw-home"></select></label>
+      <input id="nw-draft" type="text" placeholder="local name, e.g. rue-des-lilas" data-i18n-placeholder="side.draftPh" hidden>
       <p id="nw-home-why" class="note" hidden></p>
-      <label>Country <select id="nw-country"><option>FR</option><option>DE</option><option>BE</option></select></label>
-      <button id="nw-make" class="primary">Start it</button>
-      <p class="note">Or ask in the chat: “a T2 flat, electric heating, 4 rooms”.</p>
+      <label><span data-i18n="side.country">Country</span> <select id="nw-country"><option>FR</option><option>DE</option><option>BE</option></select></label>
+      <button id="nw-make" class="primary" data-i18n="side.start">Start it</button>
+      <p class="note" data-i18n="side.orChat">Or ask in the chat: “a T2 flat, electric heating, 4 rooms”.</p>
     </details>
   </aside>
 
   <section class="work">
     <nav class="tabs" role="tablist">
-      <button data-tab="design" class="is-on">Design</button>
-      <button data-tab="report">Report</button>
-      <button data-tab="bom">Materials</button>
-      <button data-tab="partners">Partners</button>
-      <button data-tab="files">Files</button>
+      <button data-tab="design" class="is-on" data-i18n="tab.design">Design</button>
+      <button data-tab="report" data-i18n="tab.report">Report</button>
+      <button data-tab="bom" data-i18n="tab.bom">Materials</button>
+      <button data-tab="partners" data-i18n="tab.partners">Partners</button>
+      <button data-tab="files" data-i18n="tab.files">Files</button>
     </nav>
-    <div id="tab-design" class="tab"><p class="note">Choose or start a workspace.</p></div>
+    <div id="tab-design" class="tab"><p class="note" data-i18n="design.choose">Choose or start a workspace.</p></div>
     <div id="tab-report" class="tab" hidden></div>
     <div id="tab-bom" class="tab" hidden></div>
     <div id="tab-partners" class="tab" hidden></div>
@@ -54,5 +69,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='i18n.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}

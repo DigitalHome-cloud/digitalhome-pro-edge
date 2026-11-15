@@ -44,13 +44,11 @@
 
 body { font-family: var(--font); -webkit-font-smoothing: antialiased; }
 .bar { background: var(--rail); border-bottom: 1px solid var(--edge); }
-.bar .brand { font-weight: 600; letter-spacing: 0; text-transform: none; }
+.bar .brand { font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink); }
+/* the mark: a head with an active brain (static/icon.svg, also the app icon) */
 .bar .brand::before {
-  content: ""; display: inline-block; width: 22px; height: 22px; margin-right: 8px; vertical-align: -6px;
-  border-radius: 6px; background-color: var(--accent);
-  -webkit-mask: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230a0c0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 11 12 4l8 7'/%3E%3Cpath d='M6 10v9h12v-9'/%3E%3C/svg%3E");
-  background-position: center; background-size: 15px; background-repeat: no-repeat;
+  content: ""; display: inline-block; width: 24px; height: 24px; margin-right: 8px; vertical-align: -7px;
+  background: url("icon.svg") center / contain no-repeat;
 }
 .bar a.btn { display: inline-flex; align-items: center; padding: 5px 12px; border: 1px solid var(--edge);
              background: var(--panel); color: var(--ink); font-size: 13px; }
@@ -160,3 +158,13 @@ table.files th, table.bom th { font: 500 10px var(--mono); text-transform: upper
 /* the chat's 📎 and dropping files on it (app.js wireChatAttach) */
 .chat-attach { min-width: 2.2rem; }
 #edge-chat.chat-drop { outline: 2px dashed var(--accent, #6fae7e); outline-offset: 4px; border-radius: 8px; }
+
+/* the header label: digitalhome in the core's muted caps, .pro in the accent */
+.brand .tld { color: var(--accent); }
+
+/* the workspace title with its Rename control, and the inline form */
+.ws-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ws-head h2 { margin-right: 4px; }
+.ws-rename { font-size: 12px; padding: 2px 8px; }
+.ws-rename-form input { font: inherit; font-size: 1.2em; min-width: 16em; }
+

@@ -418,6 +418,11 @@ def main(argv: list | None = None) -> int:
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
 
     ws.configure(user_dir=args.dir)
+    # One folder per workspace (ADR-0007): the edge layer's routes and first
+    # start build kn.KnowledgeBase() when called, so binding it here gives
+    # them the same layout as the designs.
+    dz.migrate_layout()
+    kn.KnowledgeBase = dz.WorkspaceKB
     lines = [f"  {f['label'].lower():<13} {f['path']}" for f in ws.folders()]
     edge_routes.start_background()  # edge layer
     return server.serve(app, args, lines=lines)

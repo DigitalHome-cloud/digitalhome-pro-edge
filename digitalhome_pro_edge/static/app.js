@@ -11,7 +11,11 @@
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => core.esc(String(s ?? ""));
-const LANG = (navigator.language || "en").slice(0, 2);
+const t = (key, vars) => window.i18n.t(key, vars);
+const status = (v) => t(`status.${v}`) === `status.${v}` ? v : t(`status.${v}`);
+const kind = (v) => t(`kind.${v}`) === `kind.${v}` ? v : t(`kind.${v}`);
+const when = (iso) => { try { return new Date(iso).toLocaleString(window.i18n.lang); } catch (_) { return iso || ""; } };
+const failed = (err) => (err && err.errors) ? err.errors.join("; ") : t("failed");
 
 const S = { ws: null, item: null, tab: "design", seen: {} };
 
@@ -41,22 +45,24 @@ function homeLink(id) {
   if (!c || !c.site || !c.homes.some((h) => h.smartHomeId === id)) return esc(id);
   const label = (c.homes.find((h) => h.smartHomeId === id) || {}).label;
   return `<a href="${esc(c.site.replace(/\/$/, ""))}/?home=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer"
-            title="Open ${esc(label || id)} in the Portal">${esc(id)} ↗</a>`;
+            title="${esc(t("list.openPortal", { name: label || id }))}">${esc(id)} ↗</a>`;
 }
 
 async function drawList() {
   const homes = await core.api("GET", "/api/homes");
+  const open = homes.flatMap((h) => h.workspaces).find((w) => w.workspace === S.ws);
+  S.wsTitle = open ? open.title : "";
   const key = JSON.stringify(homes) + S.ws + JSON.stringify(S.cloud || null);
   if (S.seen.list === key) return;
   S.seen.list = key;
   const box = $("#ws-list");
   if (!homes.length) {
-    box.innerHTML = '<p class="note">No workspace yet. Start one below, or ask in the chat.</p>';
+    box.innerHTML = `<p class="note">${esc(t("list.none"))}</p>`;
     return;
   }
   box.innerHTML = homes.map((h) => `<div class="home">${homeLink(h.home)}</div>` + h.workspaces.map((w) =>
     `<button data-ws="${esc(w.workspace)}" class="${w.workspace === S.ws ? "is-on" : ""}">
-       <span>${esc(w.title)}</span><small>${esc(w.status)} · ${w.circuits}</small></button>`).join("")).join("");
+       <span>${esc(w.title)}</span><small>${esc(status(w.status))} · ${w.circuits}</small></button>`).join("")).join("");
   box.querySelectorAll("button[data-ws]").forEach((b) => b.onclick = () => select(b.dataset.ws));
 }
 
@@ -73,11 +79,11 @@ async function drawHomeChoice() {
   const sel = $("#nw-home"), why = $("#nw-home-why");
   const draft = !got.linked || got.unavailable;
   sel.innerHTML = got.homes.map((h) =>
-    `<option value="${esc(h.smartHomeId)}">${esc(h.label)}${h.isDemo ? " (demo)" : ""}</option>`).join("")
-    + (draft ? '<option value="__draft">Draft, not yet a SmartHome…</option>' : "");
+    `<option value="${esc(h.smartHomeId)}">${esc(h.label)}${h.isDemo ? " " + esc(t("home.demo")) : ""}</option>`).join("")
+    + (draft ? `<option value="__draft">${esc(t("home.draft"))}</option>` : "");
   why.hidden = false;
-  why.textContent = (got.linked ? `Homes on the “${got.connection}” connection. ` : "")
-    + (got.why || (got.homes.length ? "" : "You have no home there yet: create it in the Portal."));
+  why.textContent = (got.linked ? t("home.onConnection", { name: got.connection }) : "")
+    + (got.why || (got.homes.length ? "" : t("home.noneYet")));
   $("#nw-make").disabled = !got.homes.length && !draft;
   $("#nw-draft").hidden = sel.value !== "__draft";
 }
@@ -86,7 +92,7 @@ async function drawHomeChoice() {
 
 function circuitLine(c) {
   const what = [c.type.replace("_", " "), `${c.rated_current} A`, `${c.cross_section} mm²`,
-                c.points ? `${c.points} pts` : "", c.appliance.replace("_", " ")].filter(Boolean).join(" · ");
+                c.points ? t("circuit.pts", { n: c.points }) : "", c.appliance.replace("_", " ")].filter(Boolean).join(" · ");
   const ref = c.breakers.map((b) => b.reference).filter(Boolean).join(", ");
   return `<li data-item="${esc(c.id)}" class="${c.id === S.item ? "is-on" : ""}">
             <span>${esc(c.label)}</span><small>${esc(what)}${ref ? " · " + esc(ref) : ""}</small></li>`;
@@ -97,14 +103,14 @@ function boardBlock(b) {
   const pct = Math.min(100, Math.round(100 * b.modules_used / cap));
   const cls = b.modules_used > cap ? "full" : (cap - b.modules_used) / cap < 0.2 ? "tight" : "";
   return `<article class="board">
-    <header><b>${esc(b.label)}</b><small>${b.rows} × ${b.modules_per_row} modules · ${b.modules_used} used</small></header>
+    <header><b>${esc(b.label)}</b><small>${esc(t("board.modules", { rows: b.rows, per: b.modules_per_row, used: b.modules_used }))}</small></header>
     <div class="meter ${cls}"><i style="width:${pct}%"></i></div>
     ${b.rcds.map((r) => `<div class="rcd"><b>${esc(r.label)}</b>
-        <small> ${r.rated_current} A · ${r.sensitivity_ma} mA · type ${esc(r.rcd_type)} · ${r.circuits.length} circuits</small>
+        <small> ${esc(t("board.rcd", { a: r.rated_current, ma: r.sensitivity_ma, type: r.rcd_type, n: r.circuits.length }))}</small>
         <ul class="circuits">${r.circuits.map(circuitLine).join("")}</ul></div>`).join("")}
     ${b.devices.length ? `<ul class="devices">${b.devices.map((d) =>
       `<li data-item="${esc(d.id)}"><span>${esc(d.label)}</span><small>${esc(d.kind.replace("_", " "))}${
-        d.rated_current != null ? " · " + d.rated_current + " A" : ""} · ${d.modules} mod.</small></li>`).join("")}</ul>` : ""}
+        d.rated_current != null ? " · " + d.rated_current + " A" : ""} · ${esc(t("board.mod", { n: d.modules }))}</small></li>`).join("")}</ul>` : ""}
   </article>`;
 }
 
@@ -114,23 +120,53 @@ async function drawDesign() {
   if (S.seen.design === key) return;
   S.seen.design = key;
   const box = $("#tab-design");
-  box.innerHTML = `<h2>${esc(d.title)}</h2>
-    <p class="sub">${homeLink(d.home)} · ${esc(d.country)} · ${esc(d.status)}</p>
+  box.innerHTML = `<div class="ws-head"><h2>${esc(d.title)}</h2>
+      <button type="button" class="ws-rename" title="${esc(t("design.renameTitle", { id: S.ws }))}">${esc(t("design.rename"))}</button></div>
+    <p class="sub">${homeLink(d.home)} · ${esc(d.country)} · ${esc(status(d.status))}</p>
     ${d.boards.length ? d.boards.map(boardBlock).join("")
-      : '<p class="note">No board yet. Ask in the chat, e.g. “a board of 2 rows of 13 modules with two type A RCDs”.</p>'}
-    ${d.rooms.length ? `<h3>Rooms</h3><div class="rooms">${d.rooms.map((r) =>
+      : `<p class="note">${esc(t("design.noBoard"))}</p>`}
+    ${d.rooms.length ? `<h3>${esc(t("design.rooms"))}</h3><div class="rooms">${d.rooms.map((r) =>
       `<span>${esc(r.label)}${r.items.length ? " · " + r.items.length : ""}</span>`).join("")}</div>` : ""}`;
   box.querySelectorAll("li[data-item]").forEach((li) => li.onclick = () => select(S.ws, li.dataset.item));
+  box.querySelector(".ws-rename").onclick = () => renameForm(box.querySelector(".ws-head"), d.title);
+}
+
+// The workspace's display name. Only the title changes: the id, and with it
+// the folder mydocs/<id>/, stay as they are (ADR-0007).
+function renameForm(head, title) {
+  const form = document.createElement("form");
+  form.className = "ws-head ws-rename-form";
+  form.innerHTML = `<input name="title" required maxlength="120" value="${esc(title)}">
+    <button class="primary">${esc(t("design.save"))}</button>
+    <button type="button" class="cancel">${esc(t("design.cancel"))}</button>`;
+  const ws = S.ws;
+  const back = () => { S.seen.design = null; refresh(); };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const value = form.title.value.trim();
+    if (!value || value === title) return back();
+    try {
+      await core.api("POST", `/api/workspaces/${encodeURIComponent(ws)}`, { title: value });
+      core.toast(t("design.renamed"));
+    } catch (err) { core.toast(failed(err)); }
+    S.seen.list = null;
+    back();
+  };
+  form.querySelector(".cancel").onclick = back;
+  form.title.onkeydown = (e) => { if (e.key === "Escape") back(); };
+  head.replaceWith(form);
+  form.title.focus();
+  form.title.select();
 }
 
 async function drawReport() {
-  const r = await core.api("GET", `/api/workspaces/${encodeURIComponent(S.ws)}/report?lang=${LANG}`);
+  const r = await core.api("GET", `/api/workspaces/${encodeURIComponent(S.ws)}/report?lang=${window.i18n.lang}`);
   const key = JSON.stringify(r);
   if (S.seen.report === key) return;
   S.seen.report = key;
   $("#tab-report").innerHTML = !r.findings.length
-    ? '<p class="ok">Nothing to report: the design meets every rule this edge checks.</p>'
-    : r.findings.map((f) => `<div class="finding ${esc(f.severity)}"><b>${esc(f.label || "Whole design")}</b>${esc(f.message)}</div>`).join("");
+    ? `<p class="ok">${esc(t("report.ok"))}</p>`
+    : r.findings.map((f) => `<div class="finding ${esc(f.severity)}"><b>${esc(f.label || t("report.whole"))}</b>${esc(f.message)}</div>`).join("");
 }
 
 async function drawBom() {
@@ -138,15 +174,15 @@ async function drawBom() {
   const key = JSON.stringify(b);
   if (S.seen.bom === key) return;
   S.seen.bom = key;
-  $("#tab-bom").innerHTML = `<table class="bom"><thead><tr><th>Item</th><th class="num">Qty</th>
-      <th>Reference</th><th class="num">Unit</th><th class="num">Total</th></tr></thead><tbody>
-    ${b.lines.map((l) => `<tr><td>${esc(l.description)}${l.modules_each ? ` <small>(${l.modules_each} mod.)</small>` : ""}</td>
+  $("#tab-bom").innerHTML = `<table class="bom"><thead><tr><th>${esc(t("bom.item"))}</th><th class="num">${esc(t("bom.qty"))}</th>
+      <th>${esc(t("bom.reference"))}</th><th class="num">${esc(t("bom.unit"))}</th><th class="num">${esc(t("bom.total"))}</th></tr></thead><tbody>
+    ${b.lines.map((l) => `<tr><td>${esc(l.description)}${l.modules_each ? ` <small>(${esc(t("board.mod", { n: l.modules_each }))})</small>` : ""}</td>
       <td class="num">${l.quantity}</td>
       <td>${l.reference ? esc(l.partner + " " + l.reference) : ""}${l.missing ? `<div class="missing">${esc(l.missing)}</div>` : ""}</td>
       <td class="num">${l.unit_price ? esc(l.unit_price) : ""}</td><td class="num">${l.total ? esc(l.total) : ""}</td></tr>`).join("")}
-    </tbody><tfoot><tr><th colspan="4">Priced total${b.complete ? "" : " (incomplete)"}</th>
+    </tbody><tfoot><tr><th colspan="4">${esc(t("bom.priced"))}${b.complete ? "" : esc(t("bom.incomplete"))}</th>
       <th class="num">${esc(b.total)}</th></tr></tfoot></table>
-    <p class="note">Prices come from each partner's API or imported file (Partners tab) and stay on this computer.</p>`;
+    <p class="note">${esc(t("bom.note"))}</p>`;
 }
 
 // ---------------------------------------------------------- partners ----
@@ -157,50 +193,50 @@ async function drawPartners() {
   if (S.seen.partners === key) return;
   S.seen.partners = key;
   const again = () => { S.seen.partners = null; drawPartners(); };
-  const fail = (err) => core.toast((err.errors || ["failed"]).join("; "));
+  const fail = (err) => core.toast(failed(err));
   const st = got.store;
   $("#tab-partners").innerHTML = `
-    <p class="sub">Your partners and their API access are private: kept on this computer or in the
-      connected digitalhome.cloud, never in the repository. Imported files and prices stay on this computer.</p>
-    <form class="store">Keep the list and credentials
-      <select name="where"><option value="local" ${st.where === "local" ? "selected" : ""}>on this computer</option>
-        <option value="cloud" ${st.where === "cloud" ? "selected" : ""}>in the connected cloud</option></select>
-      <button>Move</button></form>` +
+    <p class="sub">${esc(t("p.intro"))}</p>
+    <form class="store">${esc(t("p.keep"))}
+      <select name="where"><option value="local" ${st.where === "local" ? "selected" : ""}>${esc(t("p.local"))}</option>
+        <option value="cloud" ${st.where === "cloud" ? "selected" : ""}>${esc(t("p.cloud"))}</option></select>
+      <button>${esc(t("p.move"))}</button></form>` +
     got.partners.map((p) => `<section class="partner" data-p="${esc(p.partner)}">
-      <header><b>${esc(p.name)}</b> <small>${esc(p.kind)}</small><span class="use">${esc(p.use)}</span></header>
+      <header><b>${esc(p.name)}</b> <small>${esc(kind(p.kind))}</small><span class="use">${esc(p.use)}</span></header>
       ${p.note ? `<p class="note">${esc(p.note)}</p>` : ""}
-      ${p.file ? `<p class="note">File: ${esc(p.file.name || p.file.format)} · ${p.file.articles} articles</p>` : ""}
+      ${p.file ? `<p class="note">${esc(t("p.file", { name: p.file.name || p.file.format, n: p.file.articles }))}</p>` : ""}
       <form class="imp"><input type="file" name="file" required>
         <select name="format">${p.formats.map((f) => `<option>${esc(f)}</option>`).join("")}</select>
-        <button>Import</button></form>
+        <button>${esc(t("p.import"))}</button></form>
       ${p.api ? `<form class="cred">
-        <input type="text" name="client_id" placeholder="client id" autocomplete="off">
-        <input type="password" name="client_secret" placeholder="client secret" autocomplete="off">
-        <input type="text" name="supplier_id" placeholder="supplier id">
-        <input type="text" name="customer_id" placeholder="customer id">
-        <button>${p.api_configured ? "Replace" : "Use the API"}</button>
-        ${p.api_configured ? '<button type="button" class="forget">Forget</button>' : ""}</form>` : ""}
-      ${p.market ? `<form class="attach"><input type="text" name="reference" placeholder="reference" required>
+        <input type="text" name="client_id" placeholder="${esc(t("p.clientId"))}" autocomplete="off">
+        <input type="password" name="client_secret" placeholder="${esc(t("p.clientSecret"))}" autocomplete="off">
+        <input type="text" name="supplier_id" placeholder="${esc(t("p.supplierId"))}">
+        <input type="text" name="customer_id" placeholder="${esc(t("p.customerId"))}">
+        <button>${esc(p.api_configured ? t("p.replace") : t("p.useApi"))}</button>
+        ${p.api_configured ? `<button type="button" class="forget">${esc(t("p.forget"))}</button>` : ""}</form>` : ""}
+      ${p.market ? `<form class="attach"><input type="text" name="reference" placeholder="${esc(t("p.refPh"))}" required>
         <input type="file" name="file" accept=".jpg,.jpeg,.png,.webp,.pdf" required>
-        <button>Add image / datasheet</button></form>` : ""}
-      <button type="button" class="drop danger">Remove partner</button>
+        <button>${esc(t("p.attach"))}</button></form>` : ""}
+      <button type="button" class="drop danger">${esc(t("p.remove"))}</button>
     </section>`).join("") + `
-    <details class="partner"><summary>Add a partner</summary>
+    <details class="partner"><summary>${esc(t("p.add"))}</summary>
       <form class="add">
-        <input type="text" name="id" placeholder="id, e.g. acme-elec" required pattern="[a-z][a-z0-9-]{0,39}">
-        <input type="text" name="name" placeholder="name" required>
-        <select name="kind"><option>distributor</option><option>manufacturer</option><option>wholesaler</option></select>
+        <input type="text" name="id" placeholder="${esc(t("p.idPh"))}" required pattern="[a-z][a-z0-9-]{0,39}">
+        <input type="text" name="name" placeholder="${esc(t("p.namePh"))}" required>
+        <select name="kind">${["distributor", "manufacturer", "wholesaler"].map((k) =>
+          `<option value="${k}">${esc(kind(k))}</option>`).join("")}</select>
         ${got.formats.map((f) => `<label><input type="checkbox" name="formats" value="${esc(f)}" ${f === "csv" ? "checked" : ""}> ${esc(f)}</label>`).join("")}
-        <select name="api"><option value="">no API</option>${got.connectors.map((c) => `<option>${esc(c)}</option>`).join("")}</select>
-        <button class="primary">Add</button></form></details>
-    <details class="partner market" ${S.marketOpen ? "open" : ""}><summary>digitalhome.cloud marketplace</summary><div class="mk"></div></details>`;
+        <select name="api"><option value="">${esc(t("p.noApi"))}</option>${got.connectors.map((c) => `<option>${esc(c)}</option>`).join("")}</select>
+        <button class="primary">${esc(t("p.addBtn"))}</button></form></details>
+    <details class="partner market" ${S.marketOpen ? "open" : ""}><summary>${esc(t("m.title"))}</summary><div class="mk"></div></details>`;
   const box = $("#tab-partners");
   const mkt = box.querySelector("details.market");
   if (mkt.open) drawMarket(mkt.querySelector(".mk"));
   mkt.ontoggle = () => { S.marketOpen = mkt.open; if (mkt.open) drawMarket(mkt.querySelector(".mk")); };
   box.querySelector("form.store").onsubmit = async (e) => {
     e.preventDefault();
-    try { await core.api("POST", "/api/partners/store", { where: e.target.where.value }); core.toast("Moved"); }
+    try { await core.api("POST", "/api/partners/store", { where: e.target.where.value }); core.toast(t("p.moved")); }
     catch (err) { fail(err); }
     again();
   };
@@ -219,7 +255,7 @@ async function drawPartners() {
       e.preventDefault();
       const res = await fetch(`/api/partners/${encodeURIComponent(p)}/import`, { method: "POST", body: new FormData(e.target) });
       const r = await res.json().catch(() => ({}));
-      core.toast(res.ok ? `${r.articles} articles imported, ${r.priced} with a price` : (r.errors || ["failed"]).join("; "));
+      core.toast(res.ok ? t("p.imported", { n: r.articles, p: r.priced }) : failed(r));
       again();
     };
     const att = sec.querySelector("form.attach");
@@ -227,7 +263,7 @@ async function drawPartners() {
       e.preventDefault();
       const res = await fetch(`/api/partners/${encodeURIComponent(p)}/articles/file`, { method: "POST", body: new FormData(att) });
       const r = await res.json().catch(() => ({}));
-      core.toast(res.ok ? "Added; it goes to the marketplace with the next sync" : (r.errors || ["failed"]).join("; "));
+      core.toast(res.ok ? t("p.attached") : failed(r));
       again();
     };
     sec.querySelector(".drop").onclick = async () => {
@@ -240,7 +276,7 @@ async function drawPartners() {
         e.preventDefault();
         try {
           const r = await core.api("POST", `/api/partners/${encodeURIComponent(p)}/credentials`, Object.fromEntries(new FormData(cred)));
-          core.toast(r.where === "cloud" ? "Saved in the connected cloud" : "Saved on this computer");
+          core.toast(r.where === "cloud" ? t("p.savedCloud") : t("p.savedLocal"));
         } catch (err) { fail(err); }
         again();
       };
@@ -262,12 +298,11 @@ async function drawPartners() {
 function conflictForm(box, partner, got, again) {
   const form = document.createElement("form");
   form.className = "mk-conflicts";
-  form.innerHTML = `<p class="note">${esc(partner)}: the same fact was changed here and in the marketplace.
-      Choose which value to keep.</p>` +
+  form.innerHTML = `<p class="note">${esc(t("m.conflict", { p: partner }))}</p>` +
     got.conflicts.map((c, i) => `<fieldset><legend>${esc(c.subject.split("/").pop())} · ${esc(c.property.split("#").pop())}</legend>
-      <label><input type="radio" name="c${i}" value="mine" required> here: ${esc(c.mine.join(", "))}</label>
-      <label><input type="radio" name="c${i}" value="theirs"> marketplace: ${esc(c.theirs.join(", "))}</label></fieldset>`).join("") +
-    `<button class="primary">Sync with these choices</button>`;
+      <label><input type="radio" name="c${i}" value="mine" required> ${esc(t("m.here", { v: c.mine.join(", ") }))}</label>
+      <label><input type="radio" name="c${i}" value="theirs"> ${esc(t("m.there", { v: c.theirs.join(", ") }))}</label></fieldset>`).join("") +
+    `<button class="primary">${esc(t("m.resolve"))}</button>`;
   form.onsubmit = async (e) => {
     e.preventDefault();
     const resolve = {};
@@ -282,36 +317,35 @@ async function syncPartner(box, partner, resolve, again) {
     const r = await core.api("POST", "/api/market/sync", { partner, resolve });
     if (r.status === "conflict") return conflictForm(box, partner, r, again);
     if (r.status === "invalid") {
-      box.querySelector(".mk-out").innerHTML = `<p class="note">The marketplace refused ${esc(partner)}'s catalogue:</p>
+      box.querySelector(".mk-out").innerHTML = `<p class="note">${esc(t("m.refused", { p: partner }))}</p>
         <ul>${r.problems.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
       return;
     }
-    core.toast(`${partner}: ${r.pulled} in, ${r.pushed} out` + (r.local_only ? ` · ${r.local_only} kept here only` : ""));
-  } catch (err) { core.toast((err.errors || ["failed"]).join("; ")); }
+    core.toast(t("m.result", { p: partner, in: r.pulled, out: r.pushed }) + (r.local_only ? t("m.keptHere", { n: r.local_only }) : ""));
+  } catch (err) { core.toast(failed(err)); }
   again();
 }
 
 async function drawMarket(box) {
   let got;
   try { got = await core.api("GET", "/api/market"); }
-  catch (err) { box.innerHTML = `<p class="note">${esc((err.errors || ["unavailable"]).join("; "))}</p>`; return; }
+  catch (err) { box.innerHTML = `<p class="note">${esc(err && err.errors ? err.errors.join("; ") : t("unavailable"))}</p>`; return; }
   const again = () => { S.seen.partners = null; drawPartners(); };
-  box.innerHTML = `<p class="note">Catalogues published on digitalhome.cloud. A seller you subscribe to becomes a partner
-      with the same id. Prices never leave this computer.</p>
-    <table class="bom"><thead><tr><th>Seller</th><th class="num">Articles</th><th>Synced</th><th></th></tr></thead><tbody>
+  box.innerHTML = `<p class="note">${esc(t("m.intro"))}</p>
+    <table class="bom"><thead><tr><th>${esc(t("m.seller"))}</th><th class="num">${esc(t("m.articles"))}</th><th>${esc(t("m.synced"))}</th><th></th></tr></thead><tbody>
     ${got.sellers.map((s) => `<tr data-s="${esc(s.id)}">
-      <td><b>${esc(s.name)}</b> <small>${esc(s.id)} · ${esc(s.kind)}${s.mayEdit ? " · you edit it" : ""}</small></td>
+      <td><b>${esc(s.name)}</b> <small>${esc(s.id)} · ${esc(kind(s.kind))}${s.mayEdit ? esc(t("m.youEdit")) : ""}</small></td>
       <td class="num">${s.articles}</td>
-      <td>${s.synced ? `v${s.synced.version} · ${esc(s.synced.synced_at)}${s.synced.local_only ? ` · ${s.synced.local_only} here only` : ""}` : ""}</td>
-      <td>${s.subscribed ? '<button type="button" class="sync">Sync</button>' : '<button type="button" class="sub">Subscribe</button>'}</td>
-    </tr>`).join("") || '<tr><td colspan="4">No sellers yet.</td></tr>'}
+      <td>${s.synced ? `v${s.synced.version} · ${esc(when(s.synced.synced_at))}${s.synced.local_only ? esc(t("m.hereOnly", { n: s.synced.local_only })) : ""}` : ""}</td>
+      <td>${s.subscribed ? `<button type="button" class="sync">${esc(t("m.sync"))}</button>` : `<button type="button" class="sub">${esc(t("m.subscribe"))}</button>`}</td>
+    </tr>`).join("") || `<tr><td colspan="4">${esc(t("m.none"))}</td></tr>`}
     </tbody></table><div class="mk-out"></div>`;
   box.querySelectorAll("tr[data-s]").forEach((tr) => {
     const id = tr.dataset.s;
     const sub = tr.querySelector(".sub");
     if (sub) sub.onclick = async () => {
-      try { await core.api("POST", "/api/market/subscribe", { seller: id }); core.toast(`Subscribed to ${id}`); }
-      catch (err) { core.toast((err.errors || ["failed"]).join("; ")); }
+      try { await core.api("POST", "/api/market/subscribe", { seller: id }); core.toast(t("m.subscribed", { id })); }
+      catch (err) { core.toast(failed(err)); }
       again();
     };
     const sync = tr.querySelector(".sync");
@@ -331,13 +365,13 @@ async function addFile(file) {
   const res = await fetch("/api/inbox", { method: "POST", body: fd }).catch(() => null);
   const r = res ? await res.json().catch(() => ({})) : {};
   S.seen.files = null;
-  if (!res || !res.ok) { core.toast(`${file.name}: ${(r.errors || ["not added"]).join("; ")}`); return null; }
+  if (!res || !res.ok) { core.toast(`${file.name}: ${(r.errors || [t("f.notAdded")]).join("; ")}`); return null; }
   return r;
 }
 
 async function upload(file) {
   const r = await addFile(file);
-  if (r) core.toast(`${r.name}: ${r.note} — ask the chat what to do with it`);
+  if (r) core.toast(t("f.added", { name: r.name, note: r.note }));
   refresh();
 }
 
@@ -357,8 +391,8 @@ async function attachToChat(files) {
   if (btn) { btn.disabled = false; btn.textContent = "📎"; }
   if (!added.length) return;
   const line = added.length === 1
-    ? `I added “${added[0].name}” (file ${added[0].id}, ${added[0].kind}): `
-    : `I added ${added.map((r) => `“${r.name}” (file ${r.id})`).join(", ")}: `;
+    ? t("f.addedOne", { name: added[0].name, id: added[0].id, kind: added[0].kind })
+    : t("f.addedMany", { list: added.map((r) => t("f.listItem", { name: r.name, id: r.id })).join(", ") });
   input.value = input.value.trim() ? `${input.value.trim()}\n${line}` : line;
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);
@@ -376,8 +410,8 @@ function wireChatAttach() {
     pick.onchange = () => { attachToChat([...pick.files]); pick.value = ""; };
     const btn = document.createElement("button");
     btn.type = "button"; btn.className = "chat-attach"; btn.textContent = "📎";
-    btn.setAttribute("aria-label", "Add a file for the chat");
-    btn.dataset.help = "Give the chat a file: a price list, a catalogue, a quote, a spreadsheet, a model. It is kept on this computer (Files) and the chat reads it. You can also drop files on the chat.";
+    btn.setAttribute("aria-label", t("f.attachLabel"));
+    btn.dataset.help = t("f.attachHelp");
     btn.onclick = () => pick.click();
     const ask = form.querySelector('button[type="submit"]');
     form.insertBefore(btn, ask || null);
@@ -404,15 +438,15 @@ async function drawFiles() {
   S.seen.files = key;
   const box = $("#tab-files");
   box.innerHTML = `
-    <p class="sub">Give the chat a file — a price list, a catalogue, a quote, a spreadsheet, a model — and it
-      reads it and proposes what to do with it. Files stay on this computer.</p>
+    <p class="sub">${esc(t("f.intro"))}${S.wsTitle ? " " + esc(t("f.inWorkspace", { name: S.wsTitle })) : ""}</p>
     <label class="dropzone"><input type="file" multiple hidden>
-      <span>Drop files here, or click to choose</span></label>
-    ${got.length ? `<table class="files"><thead><tr><th>File</th><th>What it is</th><th class="num">Size</th><th></th></tr></thead><tbody>
+      <span>${esc(t("f.drop"))}</span></label>
+    ${got.length ? `<table class="files"><thead><tr><th>${esc(t("f.file"))}</th><th>${esc(t("f.what"))}</th><th>${esc(t("f.where"))}</th><th class="num">${esc(t("f.size"))}</th><th></th></tr></thead><tbody>
       ${got.map((f) => `<tr data-f="${esc(f.id)}"><td>${esc(f.name)}</td><td><b>${esc(f.kind)}</b> · ${esc(f.note)}</td>
-        <td class="num">${f.size < 1024 ? `${f.size} B` : `${(f.size / 1024).toFixed(0)} kB`}</td>
-        <td><button class="ask">Give to chat</button> <button class="drop">Remove</button></td></tr>`).join("")}
-      </tbody></table>` : `<p class="note">No files yet.</p>`}`;
+        <td>${f.workspace ? `<code>${esc(f.workspace)}/files</code>` : esc(t("f.shared"))}</td>
+        <td class="num">${f.size < 1024 ? `${f.size} B` : `${new Intl.NumberFormat(window.i18n.lang).format(Math.round(f.size / 1024))} kB`}</td>
+        <td><button class="ask">${esc(t("f.give"))}</button> <button class="drop">${esc(t("f.remove"))}</button></td></tr>`).join("")}
+      </tbody></table>` : `<p class="note">${esc(t("f.none"))}</p>`}`;
   const zone = box.querySelector(".dropzone");
   const input = zone.querySelector("input");
   input.onchange = () => [...input.files].forEach(upload);
@@ -423,10 +457,10 @@ async function drawFiles() {
     const f = tr.dataset.f;
     tr.querySelector(".ask").onclick = async () => {
       await core.api("POST", "/api/selection", { workspace: S.ws || "", item: S.item || "", file: f });
-      core.toast("The chat now has this file in view");
+      core.toast(t("f.inView"));
     };
     tr.querySelector(".drop").onclick = async () => {
-      try { await core.api("DELETE", `/api/inbox/${encodeURIComponent(f)}`); } catch (err) { core.toast((err.errors || ["failed"]).join("; ")); }
+      try { await core.api("DELETE", `/api/inbox/${encodeURIComponent(f)}`); } catch (err) { core.toast(failed(err)); }
       S.seen.files = null; refresh();
     };
   });
@@ -465,14 +499,18 @@ function wire() {
         title: $("#nw-title").value, home, country: $("#nw-country").value });
       $("#nw-title").value = "";
       select(got.workspace);
-    } catch (err) { core.toast(err.errors.join("; ")); }
+    } catch (err) { core.toast(failed(err)); }
   };
   $("#btn-labels").onclick = () => S.ws && window.open(`/workspaces/${encodeURIComponent(S.ws)}/labels`, "_blank");
   wireChatAttach();
+  // a language switch redraws what this page drew; i18n.js does the rest
+  window.i18n.onChange(() => { S.seen = {}; drawHomeChoice(); refresh(); });
   const h = hashState();
   select(h.ws, h.item);
   setInterval(() => { if (!document.hidden) refresh(); }, 4000);
 }
 
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
-else wire();
+// the strings first (i18n.json), then the page
+const start = () => window.i18n.ready.then(wire);
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+else start();

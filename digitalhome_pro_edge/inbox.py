@@ -9,7 +9,9 @@ the chat reads it and decides what it is for: articles for a partner, or the
 facts of a design, which it then proposes tool by tool like anything else.
 The design is the chat plus the ontologies; a file is one more input to it.
 
-Each file is kept privately, <data>/inbox/<id>/ (0700, files 0600), with
+Each file is kept privately (0700, files 0600): with a workspace open, in
+that workspace's folder, <data>/<workspace>/files/<id>/ (ADR-0007); with
+none open, in <data>/inbox/<id>/. Each has
 meta.json: name, size, the kind detected from its content (not its name
 alone), and a short note of what was found. Text is extracted on demand:
 
@@ -39,6 +41,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from . import partners as pt
+from . import selection as sel
 from .edge import knowledge as kn
 
 MAX_BYTES = 64 * 1024 * 1024
@@ -53,14 +56,35 @@ def _root() -> Path:
     return d
 
 
+def _open_workspace() -> str:
+    """The workspace the page has open, when it has a folder here."""
+    from .designs import DESIGN, RESERVED
+    w = sel.get().get("workspace", "")
+    if w and w not in RESERVED and "/" not in w and not w.startswith(".") \
+            and (kn.data_dir() / w / DESIGN).is_file():
+        return w
+    return ""
+
+
+def _ws_root(workspace: str) -> Path:
+    d = kn.data_dir() / workspace / "files"
+    d.mkdir(exist_ok=True, mode=0o700)
+    return d
+
+
+def _roots() -> List[Path]:
+    """Where files are looked for: the shared inbox, then every workspace's files."""
+    return [_root()] + sorted(kn.data_dir().glob("*/files"))
+
+
 def _dir(fid: str) -> Path:
     if not _ID.match(fid or ""):
         raise ValueError(f"not a file id: {fid}")
-    d = _root() / fid
-    if not d.is_dir():
-        from .designs import NotFound
-        raise NotFound(f"no file {fid} in the inbox")
-    return d
+    for root in _roots():
+        if (root / fid).is_dir():
+            return root / fid
+    from .designs import NotFound
+    raise NotFound(f"no file {fid} in the inbox")
 
 
 def _write(path: Path, data: bytes) -> None:
@@ -217,22 +241,28 @@ def add(name: str, data: bytes) -> Dict:
         raise ValueError(f"files up to {MAX_BYTES // (1024 * 1024)} MB")
     name = Path(name or "file").name[:200] or "file"
     fid = "in-" + secrets.token_hex(5)
-    d = _root() / fid
+    workspace = _open_workspace()
+    d = (_ws_root(workspace) if workspace else _root()) / fid
     d.mkdir(mode=0o700)
     raw = d / "file"
     _write(raw, data)
     found = detect(name, data, raw)
-    meta = {"id": fid, "name": name, "size": len(data), "added": int(time.time()), **found}
+    meta = {"id": fid, "name": name, "size": len(data), "added": int(time.time()),
+            "workspace": workspace, **found}
     _write(d / "meta.json", json.dumps(meta, ensure_ascii=False).encode())
     return meta
 
 
 def files() -> List[Dict]:
+    """The open workspace's files and the shared inbox's."""
+    workspace = _open_workspace()
+    roots = [_root()] + ([kn.data_dir() / workspace / "files"] if workspace else [])
     out = []
-    for d in _root().iterdir():
-        m = d / "meta.json"
-        if _ID.match(d.name) and m.exists():
-            out.append(json.loads(m.read_text()))
+    for root in roots:
+        for d in root.iterdir() if root.is_dir() else []:
+            m = d / "meta.json"
+            if _ID.match(d.name) and m.exists():
+                out.append({"workspace": "", **json.loads(m.read_text())})
     return sorted(out, key=lambda m: -m["added"])
 
 
