@@ -63,8 +63,9 @@ async function drawHomeChoice() {
   sel.innerHTML = got.homes.map((h) =>
     `<option value="${esc(h.smartHomeId)}">${esc(h.label)}${h.isDemo ? " (demo)" : ""}</option>`).join("")
     + (draft ? '<option value="__draft">Draft, not yet a SmartHome…</option>' : "");
-  why.hidden = !got.why && got.homes.length > 0;
-  why.textContent = got.why || (got.homes.length ? "" : "You have no home on digitalhome.cloud yet: create it in the Portal.");
+  why.hidden = false;
+  why.textContent = (got.linked ? `Homes on the “${got.connection}” connection. ` : "")
+    + (got.why || (got.homes.length ? "" : "You have no home there yet: create it in the Portal."));
   $("#nw-make").disabled = !got.homes.length && !draft;
   $("#nw-draft").hidden = sel.value !== "__draft";
 }

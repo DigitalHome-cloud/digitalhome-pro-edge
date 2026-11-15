@@ -146,7 +146,7 @@ def test_a_linked_edge_only_starts_workspaces_for_its_cloud_homes(client, monkey
         calls.append(path)
         return {"homes": [{"smartHomeId": "DE-39576-0001", "label": "Main street 1, Town", "linked": True}]}
     monkeypatch.setattr(cloud, "call", call)
-    hm._cache.update(at=0.0, value=None)
+    hm._cache.update(at=0.0, value=None, profile=None)
     got = client.get("/api/cloud-homes").get_json()
     assert got["linked"] and got["homes"][0]["smartHomeId"] == "DE-39576-0001"
     bad = client.post("/api/workspaces", json={"title": "Kitchen", "home": "made-up", "country": "DE"})
@@ -154,7 +154,7 @@ def test_a_linked_edge_only_starts_workspaces_for_its_cloud_homes(client, monkey
     ok = client.post("/api/workspaces", json={"title": "Kitchen", "home": "DE-39576-0001", "country": "DE"})
     assert ok.status_code == 200
     assert calls == ["homes"]                      # cached for the page's polling
-    hm._cache.update(at=0.0, value=None)
+    hm._cache.update(at=0.0, value=None, profile=None)
 
 
 def test_an_unlinked_edge_may_start_a_draft(client, monkeypatch):
@@ -164,7 +164,22 @@ def test_an_unlinked_edge_may_start_a_draft(client, monkeypatch):
     def call(path, body, profile=None):
         raise cloud.NotLinked("not linked")
     monkeypatch.setattr(cloud, "call", call)
-    hm._cache.update(at=0.0, value=None)
+    hm._cache.update(at=0.0, value=None, profile=None)
     assert client.get("/api/cloud-homes").get_json()["linked"] is False
     assert client.post("/api/workspaces", json={"title": "Draft", "home": "rue-des-lilas"}).status_code == 200
-    hm._cache.update(at=0.0, value=None)
+    hm._cache.update(at=0.0, value=None, profile=None)
+
+
+def test_switching_connection_shows_that_clouds_homes(client, monkeypatch):
+    from digitalhome_pro_edge import homes as hm
+    from digitalhome_pro_edge.edge import cloud
+    current = {"name": "stage"}
+    monkeypatch.setattr(cloud, "active_profile", lambda: current["name"])
+    monkeypatch.setattr(cloud, "call", lambda path, body, profile=None:
+                        {"homes": [{"smartHomeId": f"{current['name']}-home", "label": current["name"]}]})
+    hm._cache.update(at=0.0, value=None, profile=None)
+    assert client.get("/api/cloud-homes").get_json()["homes"][0]["smartHomeId"] == "stage-home"
+    current["name"] = "prod"
+    got = client.get("/api/cloud-homes").get_json()
+    assert got["homes"][0]["smartHomeId"] == "prod-home" and got["connection"] == "prod"
+    hm._cache.update(at=0.0, value=None, profile=None)
