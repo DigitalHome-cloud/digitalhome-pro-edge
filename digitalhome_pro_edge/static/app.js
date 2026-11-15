@@ -34,9 +34,19 @@ async function select(ws, item) {
 
 // ----------------------------------------------------------- the list ----
 
+// A home of the linked cloud as a link to it in the Portal (the Portal opens a home with ?home=);
+// a draft or a home of another cloud stays plain text.
+function homeLink(id) {
+  const c = S.cloud;
+  if (!c || !c.site || !c.homes.some((h) => h.smartHomeId === id)) return esc(id);
+  const label = (c.homes.find((h) => h.smartHomeId === id) || {}).label;
+  return `<a href="${esc(c.site.replace(/\/$/, ""))}/?home=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer"
+            title="Open ${esc(label || id)} in the Portal">${esc(id)} ↗</a>`;
+}
+
 async function drawList() {
   const homes = await core.api("GET", "/api/homes");
-  const key = JSON.stringify(homes) + S.ws;
+  const key = JSON.stringify(homes) + S.ws + JSON.stringify(S.cloud || null);
   if (S.seen.list === key) return;
   S.seen.list = key;
   const box = $("#ws-list");
@@ -44,7 +54,7 @@ async function drawList() {
     box.innerHTML = '<p class="note">No workspace yet. Start one below, or ask in the chat.</p>';
     return;
   }
-  box.innerHTML = homes.map((h) => `<div class="home">${esc(h.home)}</div>` + h.workspaces.map((w) =>
+  box.innerHTML = homes.map((h) => `<div class="home">${homeLink(h.home)}</div>` + h.workspaces.map((w) =>
     `<button data-ws="${esc(w.workspace)}" class="${w.workspace === S.ws ? "is-on" : ""}">
        <span>${esc(w.title)}</span><small>${esc(w.status)} · ${w.circuits}</small></button>`).join("")).join("");
   box.querySelectorAll("button[data-ws]").forEach((b) => b.onclick = () => select(b.dataset.ws));
@@ -58,6 +68,8 @@ async function drawHomeChoice() {
   const key = JSON.stringify(got);
   if (S.seen.homes === key) return;
   S.seen.homes = key;
+  S.cloud = got.linked ? { site: got.site, homes: got.homes } : null;
+  S.seen.list = S.seen.design = null;           // redraw the home links
   const sel = $("#nw-home"), why = $("#nw-home-why");
   const draft = !got.linked || got.unavailable;
   sel.innerHTML = got.homes.map((h) =>
@@ -98,12 +110,12 @@ function boardBlock(b) {
 
 async function drawDesign() {
   const d = await core.api("GET", `/api/workspaces/${encodeURIComponent(S.ws)}`);
-  const key = JSON.stringify(d) + S.item;
+  const key = JSON.stringify(d) + S.item + JSON.stringify(S.cloud || null);
   if (S.seen.design === key) return;
   S.seen.design = key;
   const box = $("#tab-design");
   box.innerHTML = `<h2>${esc(d.title)}</h2>
-    <p class="sub">${esc(d.home)} · ${esc(d.country)} · ${esc(d.status)}</p>
+    <p class="sub">${homeLink(d.home)} · ${esc(d.country)} · ${esc(d.status)}</p>
     ${d.boards.length ? d.boards.map(boardBlock).join("")
       : '<p class="note">No board yet. Ask in the chat, e.g. “a board of 2 rows of 13 modules with two type A RCDs”.</p>'}
     ${d.rooms.length ? `<h3>Rooms</h3><div class="rooms">${d.rooms.map((r) =>

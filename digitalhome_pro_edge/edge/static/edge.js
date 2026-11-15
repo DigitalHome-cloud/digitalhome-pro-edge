@@ -43,7 +43,8 @@
     try { st = await api("GET", "/api/cloud"); } catch (e) { box.replaceChildren(el("p", { class: "err" }, e.message)); return; }
     const rows = Object.entries(st.profiles || {}).map(([name, c]) => el("li", { class: `edge-conn${name === st.profile ? " is-current" : ""}` },
       el("span", { class: `edge-dot ${c.linked ? "ok" : "off"}`, title: c.linked ? "linked" : "not linked" }, "●"), " ",
-      el("b", {}, host(c.site) || name), " ",
+      c.site ? el("a", { href: c.site, target: "_blank", rel: "noopener noreferrer", class: "edge-site", title: `Open ${host(c.site)}` }, el("b", {}, host(c.site)))
+             : el("b", {}, name), " ",
       el("span", { class: "edge-tag" }, name + (name === st.profile ? " · current" : "")),
       c.tenant ? el("span", { class: "edge-tag" }, `${c.tenant.name} · ${c.spaces.length} space${c.spaces.length === 1 ? "" : "s"}`) : null,
       c.no_tenant ? el("span", { class: "edge-tag err" }, "no tenant: link again") : null,
@@ -58,14 +59,15 @@
       api("POST", "/api/cloud/link", { cloud: f.cloud.value.trim(), profile: f.profile.value.trim() || null })
         .then(connections).catch((e) => alert(e.message));
     } } },
-      el("input", { name: "cloud", placeholder: "edge API address (the cloud's About page)", required: true, size: 48 }),
+      el("input", { name: "cloud", placeholder: "edge API address, e.g. https://stage-api.digitalhome.cloud", required: true, size: 48 }),
       el("input", { name: "profile", placeholder: "name, e.g. prod", pattern: "[a-z][a-z0-9-]{0,31}", size: 10 }),
       el("button", { type: "submit", "data-help": "Show a code that an admin of your tenant approves on the cloud's /link page. No password is typed here." }, "+ Add connection"));
     const pairing = link.state === "waiting" ? el("p", { class: "edge-pairing" },
       "Ask an admin of your tenant to approve code ", el("b", {}, link.user_code || "…"), " on ",
       el("a", { href: link.url, target: "_blank", rel: "noopener noreferrer" }, host(link.url)), ".")
       : link.state === "failed" ? el("p", { class: "err" }, link.error) : null;
-    box.replaceChildren(el("h2", {}, "Connections"), el("ul", { class: "edge-conns" }, rows.length ? rows : el("li", {}, "Not linked to a cloud yet.")), pairing, form);
+    // replaceChildren prints a null as "null": leave the missing parts out
+    box.replaceChildren(...[el("h2", {}, "Connections"), el("ul", { class: "edge-conns" }, rows.length ? rows : el("li", {}, "Not linked to a cloud yet.")), pairing, form].filter(Boolean));
     clearTimeout(poll);
     if (link.state === "waiting") poll = setTimeout(connections, 3000);
   }

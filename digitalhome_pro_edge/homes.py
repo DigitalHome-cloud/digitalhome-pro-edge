@@ -45,6 +45,8 @@ def cloud_homes(refresh: bool = False) -> Dict:
                else f"digitalhome.cloud did not answer: {e}")
         value = {"linked": True, "homes": [], "why": why, "unavailable": True}
     value.setdefault("connection", profile)
+    # the cloud's web site (the Portal), for links to a home: <site>/?home=<SmartHome ID>
+    value["site"] = cloud.load_state(profile).get("site") if value["linked"] else None
     _cache.update(at=now, value=value, profile=profile)
     return value
 
