@@ -193,10 +193,19 @@ def partner_search(partner: str, query: str, limit: int = 20) -> list:
 
 @server.tool()
 def new_workspace(title: str, home: str, country: str = "FR") -> dict:
-    """Start a workspace (a project) for a home: its SmartHome ID or a short
-    local name. The country chooses the norm (FR: NF C 15-100)."""
+    """Start a workspace (a project) for a home. The home is a SmartHome ID
+    from cloud_homes(); only an edge not linked yet may use a draft name.
+    The country chooses the norm (FR: NF C 15-100)."""
     return act(f"New workspace “{title}” for home {home}", "POST", "/api/workspaces",
                {"title": title, "home": home, "country": country})
+
+
+@server.tool()
+def cloud_homes() -> dict:
+    """The person's homes on digitalhome.cloud (SmartHome ID, address label,
+    country), which a new workspace must name. linked=false: the edge is not
+    linked yet, and a workspace can only be a draft for a local name."""
+    return _get("/api/cloud-homes")
 
 
 @server.tool()

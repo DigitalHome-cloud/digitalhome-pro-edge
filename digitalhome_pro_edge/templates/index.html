@@ -24,7 +24,9 @@
     <details class="new-ws">
       <summary>New workspace</summary>
       <label>Project <input id="nw-title" placeholder="e.g. New switchboard"></label>
-      <label>Home <input id="nw-home" placeholder="SmartHome ID or a short name"></label>
+      <label>Home <select id="nw-home"></select></label>
+      <input id="nw-draft" type="text" placeholder="local name, e.g. rue-des-lilas" hidden>
+      <p id="nw-home-why" class="note" hidden></p>
       <label>Country <select id="nw-country"><option>FR</option><option>DE</option><option>BE</option></select></label>
       <button id="nw-make" class="primary">Start it</button>
       <p class="note">Or ask in the chat: “a T2 flat, electric heating, 4 rooms”.</p>

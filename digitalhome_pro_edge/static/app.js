@@ -50,6 +50,25 @@ async function drawList() {
   box.querySelectorAll("button[data-ws]").forEach((b) => b.onclick = () => select(b.dataset.ws));
 }
 
+// The homes a new workspace may name: the person's homes on digitalhome.cloud.
+// Not linked yet: a draft for a local name, said so.
+async function drawHomeChoice() {
+  let got;
+  try { got = await core.api("GET", "/api/cloud-homes"); } catch (_) { return; }
+  const key = JSON.stringify(got);
+  if (S.seen.homes === key) return;
+  S.seen.homes = key;
+  const sel = $("#nw-home"), why = $("#nw-home-why");
+  const draft = !got.linked || got.unavailable;
+  sel.innerHTML = got.homes.map((h) =>
+    `<option value="${esc(h.smartHomeId)}">${esc(h.label)}${h.isDemo ? " (demo)" : ""}</option>`).join("")
+    + (draft ? '<option value="__draft">Draft, not yet a SmartHome…</option>' : "");
+  why.hidden = !got.why && got.homes.length > 0;
+  why.textContent = got.why || (got.homes.length ? "" : "You have no home on digitalhome.cloud yet: create it in the Portal.");
+  $("#nw-make").disabled = !got.homes.length && !draft;
+  $("#nw-draft").hidden = sel.value !== "__draft";
+}
+
 // --------------------------------------------------------- the design ----
 
 function circuitLine(c) {
@@ -261,6 +280,7 @@ async function drawFiles() {
 async function refresh() {
   try {
     await drawList();
+    drawHomeChoice();
     if (S.tab === "partners") return drawPartners();
     if (S.tab === "files") return drawFiles();
     if (!S.ws) return;
@@ -280,10 +300,12 @@ function wire() {
     S.seen = {};
     refresh();
   });
+  $("#nw-home").onchange = () => { $("#nw-draft").hidden = $("#nw-home").value !== "__draft"; };
   $("#nw-make").onclick = async () => {
     try {
+      const home = $("#nw-home").value === "__draft" ? $("#nw-draft").value.trim() : $("#nw-home").value;
       const got = await core.api("POST", "/api/workspaces", {
-        title: $("#nw-title").value, home: $("#nw-home").value, country: $("#nw-country").value });
+        title: $("#nw-title").value, home, country: $("#nw-country").value });
       $("#nw-title").value = "";
       select(got.workspace);
     } catch (err) { core.toast(err.errors.join("; ")); }

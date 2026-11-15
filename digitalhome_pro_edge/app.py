@@ -22,6 +22,7 @@ from flask import abort, jsonify, render_template, request
 
 from . import catalogue as cat
 from . import designs as dz
+from . import homes as hm
 from . import inbox as ib
 from . import labels as lb
 from . import partners as pt
@@ -109,9 +110,17 @@ def workspaces():
     return run(designs().workspaces)
 
 
+@app.get("/api/cloud-homes")
+def cloud_homes():
+    return jsonify(hm.cloud_homes(refresh=request.args.get("refresh") == "1"))
+
+
 @app.post("/api/workspaces")
 def new_workspace():
-    return run(designs().new_workspace, **fields("title", "home", "country"))
+    def make(title: str = "", home: str = "", country: str = "FR"):
+        hm.check((home or "").strip())
+        return designs().new_workspace(title, home, country)
+    return run(make, **fields("title", "home", "country"))
 
 
 @app.get("/api/workspaces/<ws>")

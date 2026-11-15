@@ -135,3 +135,36 @@ def test_a_dropped_file_becomes_the_chats_selection(client):
     assert client.get("/api/inbox/in-0000000000").status_code == 404
     assert client.get("/api/inbox/nope").status_code == 400
     assert client.delete(f"/api/inbox/{fid}").status_code == 200
+
+
+def test_a_linked_edge_only_starts_workspaces_for_its_cloud_homes(client, monkeypatch):
+    from digitalhome_pro_edge import homes as hm
+    from digitalhome_pro_edge.edge import cloud
+    calls = []
+
+    def call(path, body, profile=None):
+        calls.append(path)
+        return {"homes": [{"smartHomeId": "DE-39576-0001", "label": "Main street 1, Town", "linked": True}]}
+    monkeypatch.setattr(cloud, "call", call)
+    hm._cache.update(at=0.0, value=None)
+    got = client.get("/api/cloud-homes").get_json()
+    assert got["linked"] and got["homes"][0]["smartHomeId"] == "DE-39576-0001"
+    bad = client.post("/api/workspaces", json={"title": "Kitchen", "home": "made-up", "country": "DE"})
+    assert bad.status_code == 400 and "Portal" in bad.get_json()["errors"][0]
+    ok = client.post("/api/workspaces", json={"title": "Kitchen", "home": "DE-39576-0001", "country": "DE"})
+    assert ok.status_code == 200
+    assert calls == ["homes"]                      # cached for the page's polling
+    hm._cache.update(at=0.0, value=None)
+
+
+def test_an_unlinked_edge_may_start_a_draft(client, monkeypatch):
+    from digitalhome_pro_edge import homes as hm
+    from digitalhome_pro_edge.edge import cloud
+
+    def call(path, body, profile=None):
+        raise cloud.NotLinked("not linked")
+    monkeypatch.setattr(cloud, "call", call)
+    hm._cache.update(at=0.0, value=None)
+    assert client.get("/api/cloud-homes").get_json()["linked"] is False
+    assert client.post("/api/workspaces", json={"title": "Draft", "home": "rue-des-lilas"}).status_code == 200
+    hm._cache.update(at=0.0, value=None)
