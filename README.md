@@ -2,11 +2,23 @@
 
 **v0.1.0** · GPL-3.0 · [releases](https://github.com/DigitalHome-cloud/digitalhome-pro-edge/releases)
 
-digitalhome.pro.
+**digitalhome.pro** — design a home's electrical installation by talking to
+Claude. A home has one or more **workspaces**, each an active project (a new
+switchboard, a kitchen) holding one design: boards → RCDs → circuits →
+points in rooms. Claude proposes every change and you confirm it; the page
+shows the board, a **report** against NF C 15-100, the **materials**, and
+prints **QR labels** for the board. Product data and prices come from each
+**partner** by API or by an imported file (BMEcat, Datanorm, CSV) and stay on
+this computer.
 
-<!-- Generated from the D-LAB-5 tool template. Rewrite the parts about notes;
-     keep the install, update and agent sections accurate. scripts/release.py
-     updates every v-pin in this file. -->
+It is the DigitalHome.Cloud edge for designers and installers; running a home
+is [digitalhome-devops-edge](https://github.com/DigitalHome-cloud/digitalhome-devops-edge).
+Decisions: [`docs/adr/`](docs/adr/). The edge layer: [`docs/edge.md`](docs/edge.md).
+
+- Ontology: `scripts/sync-ontology.sh` copies `dhc-core.ttl` and the norm
+  shapes from a darkfactory checkout.
+- Nothing real belongs in this repository: no customers, quotes, prices or
+  credentials. Examples and tests use invented homes.
 
 ## Use it
 

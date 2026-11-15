@@ -1,36 +1,49 @@
 {% extends "core/_base.html" %}
 
-{#- The tool's page. The header (theme, About, Restart, Stop) and core.js come
-    from core/_base.html; this file fills the blocks. -#}
+{#- digitalhome.pro: a home's workspaces and the design each holds. The
+    header and core.js come from core/_base.html; the chat and connections
+    panels from the edge layer (edge.js). -#}
 
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="stylesheet" href="/edge-static/edge.css">  <!-- edge layer -->
+<script src="/edge-static/edge.js" defer></script>
 {% endblock %}
 
 {% block toolbar %}
-  <button id="btn-new">New</button>
-  <button id="btn-save" class="primary">Save</button>
-  <button id="btn-delete" class="danger">Delete</button>
+  <button id="btn-labels" disabled title="print a label for every device on the boards">Labels</button>
+  <a id="btn-export" class="btn" hidden download>Export .ttl</a>
 {% endblock %}
 
 {% block main %}
 <main class="layout">
 
   <aside class="side">
-    <h3>Notes</h3>
-    <div id="note-list" class="note-list"><p class="note">loading…</p></div>
+    <h3>Homes and workspaces</h3>
+    <div id="ws-list" class="ws-list"><p class="note">loading…</p></div>
+    <details class="new-ws">
+      <summary>New workspace</summary>
+      <label>Project <input id="nw-title" placeholder="e.g. New switchboard"></label>
+      <label>Home <input id="nw-home" placeholder="SmartHome ID or a short name"></label>
+      <label>Country <select id="nw-country"><option>FR</option><option>DE</option><option>BE</option></select></label>
+      <button id="nw-make" class="primary">Start it</button>
+      <p class="note">Or ask in the chat: “a T2 flat, electric heating, 4 rooms”.</p>
+    </details>
   </aside>
-  <section class="editor">
-    <label>Title <input type="text" id="f-title" placeholder="What is this note about?"></label>
-    <label>Name <input type="text" id="f-name" placeholder="file name, e.g. meeting-notes"></label>
-    <label>Body <textarea id="f-body" rows="12"></textarea></label>
-    <label>Tags <input type="text" id="f-tags" placeholder="comma, separated"></label>
-    <div class="actions">
-      <button id="btn-summarise">Summarise</button>
-      <span id="status" class="note"></span>
-    </div>
-    <pre id="summary" class="summary" hidden></pre>
+
+  <section class="work">
+    <nav class="tabs" role="tablist">
+      <button data-tab="design" class="is-on">Design</button>
+      <button data-tab="report">Report</button>
+      <button data-tab="bom">Materials</button>
+      <button data-tab="partners">Partners</button>
+    </nav>
+    <div id="tab-design" class="tab"><p class="note">Choose or start a workspace.</p></div>
+    <div id="tab-report" class="tab" hidden></div>
+    <div id="tab-bom" class="tab" hidden></div>
+    <div id="tab-partners" class="tab" hidden></div>
   </section>
+
   <section id="edge-connections" class="panel"></section>  <!-- edge layer -->
   <section id="edge-chat" class="panel"></section>
 </main>
@@ -39,5 +52,3 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}
-<link rel="stylesheet" href="/edge-static/edge.css">
-<script src="/edge-static/edge.js" defer></script>

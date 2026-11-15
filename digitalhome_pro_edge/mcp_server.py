@@ -24,84 +24,211 @@ from __future__ import annotations
 
 import argparse
 import urllib.parse
-from typing import Optional
 
 from mcp.server.mcpserver import MCPServer
 
-from . import engine as engine
 from .core import mcp_bridge as web
 
 server = MCPServer(
     name="digitalhome-pro-edge",
     instructions=(
-        "digitalhome.pro" + ". "
-        "A note is a JSON object with a title, a body and optional tags. "
-        "Call validate_note before saving anything you assembled by hand."
-        " Notes live in two folders: 'user' (the person's own, where new saves "
-        "go) and 'shared' (samples that ship with the tool). Pass the version "
-        "read_note returned as base_version when you save, so a change the "
-        "person made in the browser meanwhile is never overwritten silently."
+        "digitalhome.pro designs the electrical installation of a home with you. "
+        "A home has one or more workspaces, each an active project (a new board, "
+        "a kitchen) holding one design: boards, RCDs, circuits with their own "
+        "breakers, rooms and points. Read with workspaces() and design(); change "
+        "with the add_/set_/move_/rename/remove tools, each of which the person "
+        "confirms. After changes, call report() and explain what it finds in the "
+        "person's language: a design that breaks a norm is saved and reported, "
+        "never refused. bom() is the bill of materials, priced where a partner "
+        "reference is set and the partner has a price (API or imported file); "
+        "find references with partners() and partner_search()."
     ),
 )
 
 web.add_core_tools(server)
 
-from .edge.mcp_tools import add_edge_tools  # edge layer
+from .edge.mcp_tools import act, add_edge_tools  # edge layer
 add_edge_tools(server)
 
 
-@server.tool()
-def validate_note(note: dict) -> list[str]:
-    """Everything wrong with a note. An empty list means it is valid."""
-    return engine.validate(note)
+def _q(x: str) -> str:
+    return urllib.parse.quote(x, safe="")
 
 
-@server.tool()
-def summarise_note(note: dict) -> dict:
-    """Word and line counts and the distinct tags of a valid note."""
-    errors = engine.validate(note)
-    if errors:
-        # web.ToolError, not ValueError: only this kind reaches the agent's model
-        raise web.ToolError("; ".join(errors))
-    return engine.summarise(note)
+def _ws(ws: str) -> str:
+    return f"/api/workspaces/{_q(ws)}"
 
 
-def _qualify(name: str, folder: str) -> str:
-    path = f"/api/notes/{urllib.parse.quote(name)}"
-    return f"{path}?folder={urllib.parse.quote(folder)}" if folder else path
-
-
-@server.tool()
-def list_notes() -> list[dict]:
-    """Every saved note, with its folder and version."""
+def _get(path: str):
     web.ensure_server()
-    return web.call("GET", "/api/notes")
+    return web.call("GET", path)
+
+
+def _clean(**kw) -> dict:
+    return {k: v for k, v in kw.items() if v is not None and v != ""}
+
+
+# ------------------------------------------------------------- reading ----
+
+@server.tool()
+def selection() -> dict:
+    """What the person has open on the page: a workspace, and an item in it."""
+    return _get("/api/selection")
 
 
 @server.tool()
-def read_note(name: str, folder: str = "") -> dict:
-    """One note: {name, folder, version, data}. With no folder, the user's
-    copy wins over a shared one of the same name."""
-    web.ensure_server()
-    return web.call("GET", _qualify(name, folder))
+def workspaces() -> list:
+    """Every workspace on this edge: its home, title, status, and how many
+    boards and circuits its design has."""
+    return _get("/api/workspaces")
 
 
 @server.tool()
-def save_note(name: str, note: dict, folder: str = "",
-              base_version: Optional[str] = None) -> dict:
-    """Write a note. With no folder it goes back where it lives, or to 'user'
-    when new. Pass base_version from read_note: a save against a version that
-    has since changed is refused, and the error carries the current content."""
-    web.ensure_server()
-    payload = {"note": note, "folder": folder or None, "base_version": base_version}
-    return web.call("PUT", _qualify(name, ""), payload)
+def design(workspace: str) -> dict:
+    """One workspace's design: boards (rows, modules, used) → RCDs → circuits
+    (type, rating, section, points, breaker) → points; other devices on each
+    board; rooms and what is placed in them. Ids are what the change tools take."""
+    return _get(_ws(workspace))
 
 
 @server.tool()
-def delete_note(name: str, folder: str = "") -> dict:
-    """Delete a note. Say which folder when the name exists in both."""
-    web.ensure_server()
-    return web.call("DELETE", _qualify(name, folder))
+def report(workspace: str, lang: str = "en") -> dict:
+    """What in the design breaks a rule, as sentences in en, fr or de: the NF C
+    15-100 shapes and the board rules (at least two 30 mA RCDs, at most 8
+    circuits per RCD, type A where needed, about 20 % free modules)."""
+    return _get(_ws(workspace) + f"/report?lang={_q(lang)}")
+
+
+@server.tool()
+def bom(workspace: str) -> dict:
+    """The bill of materials, counted per kind and rating, with unit prices and
+    totals where a partner reference is set and priced; each unpriced line says why."""
+    return _get(_ws(workspace) + "/bom")
+
+
+@server.tool()
+def partners() -> list:
+    """Each manufacturer or distributor: which channel is in use (api, file or
+    none), what is possible, and the imported file if any. Never credentials."""
+    return _get("/api/partners")
+
+
+@server.tool()
+def partner_search(partner: str, query: str, limit: int = 20) -> list:
+    """Articles in a partner's imported file matching every word of the query
+    (reference, description, EAN, ETIM class), with their prices."""
+    return _get(f"/api/partners/{_q(partner)}/search?q={_q(query)}&limit={int(limit)}")
+
+
+# ------------------------------------------------------------- changing ----
+
+@server.tool()
+def new_workspace(title: str, home: str, country: str = "FR") -> dict:
+    """Start a workspace (a project) for a home: its SmartHome ID or a short
+    local name. The country chooses the norm (FR: NF C 15-100)."""
+    return act(f"New workspace “{title}” for home {home}", "POST", "/api/workspaces",
+               {"title": title, "home": home, "country": country})
+
+
+@server.tool()
+def set_workspace(workspace: str, title: str = "", status: str = "") -> dict:
+    """Rename a workspace, or set its status: active, quoted, done, archived."""
+    return act(f"Update workspace {workspace}", "POST", _ws(workspace), _clean(title=title, status=status))
+
+
+@server.tool()
+def add_board(workspace: str, label: str, rows: int = 1, modules_per_row: int = 13) -> dict:
+    """A distribution board with rows × modules per row (18 mm modules)."""
+    return act(f"Add board “{label}” ({rows} × {modules_per_row} modules)", "POST",
+               _ws(workspace) + "/boards", {"label": label, "rows": rows, "modules_per_row": modules_per_row})
+
+
+@server.tool()
+def set_board(workspace: str, board: str, rows: int = 0, modules_per_row: int = 0) -> dict:
+    """Resize a board."""
+    return act(f"Resize board {board}", "POST", _ws(workspace) + f"/boards/{_q(board)}",
+               _clean(rows=rows or None, modules_per_row=modules_per_row or None))
+
+
+@server.tool()
+def add_rcd(workspace: str, board: str, label: str, rated_current: float = 40,
+            sensitivity_ma: float = 30, rcd_type: str = "A") -> dict:
+    """A residual-current device (2 modules) on a board: rating in A,
+    sensitivity in mA, type AC, A, F or B."""
+    return act(f"Add RCD “{label}” {rated_current:g} A {sensitivity_ma:g} mA type {rcd_type}", "POST",
+               _ws(workspace) + "/rcds", {"board": board, "label": label, "rated_current": rated_current,
+                                          "sensitivity_ma": sensitivity_ma, "rcd_type": rcd_type})
+
+
+@server.tool()
+def add_device(workspace: str, board: str, kind: str, label: str,
+               rated_current: float = 0, modules: int = 0) -> dict:
+    """Another board device: contactor (e.g. day/night for the water heater),
+    surge_protector, or breaker (e.g. the 2 A control circuit)."""
+    return act(f"Add {kind.replace('_', ' ')} “{label}”", "POST", _ws(workspace) + "/devices",
+               _clean(board=board, kind=kind, label=label, rated_current=rated_current or None,
+                      modules=modules or None))
+
+
+@server.tool()
+def add_circuit(workspace: str, rcd: str, label: str, circuit_type: str, rated_current: float,
+                cross_section: float, points: int = 0, appliance: str = "") -> dict:
+    """A circuit and its own breaker below an RCD. circuit_type: lighting,
+    socket, cooking, water_heater, heating, floor_heating, ev_charger,
+    dedicated (then say the appliance: washing_machine, dishwasher, dryer,
+    oven, heat_pump …). Rating in A, section in mm², points if known."""
+    return act(f"Add circuit “{label}” {rated_current:g} A {cross_section:g} mm²", "POST",
+               _ws(workspace) + "/circuits",
+               _clean(rcd=rcd, label=label, circuit_type=circuit_type, rated_current=rated_current,
+                      cross_section=cross_section, points=points or None, appliance=appliance))
+
+
+@server.tool()
+def move_circuit(workspace: str, circuit: str, rcd: str) -> dict:
+    """Put a circuit below another RCD."""
+    return act(f"Move circuit {circuit} to RCD {rcd}", "POST",
+               _ws(workspace) + f"/circuits/{_q(circuit)}/move", {"rcd": rcd})
+
+
+@server.tool()
+def add_room(workspace: str, label: str, level: str = "") -> dict:
+    """A room, optionally on a level (ground floor, first floor …)."""
+    return act(f"Add room “{label}”", "POST", _ws(workspace) + "/rooms", _clean(label=label, level=level))
+
+
+@server.tool()
+def add_point(workspace: str, circuit: str, kind: str, label: str, room: str = "") -> dict:
+    """A point on a circuit (socket, light, switch, appliance, outlet), in a room."""
+    return act(f"Add {kind} “{label}”", "POST", _ws(workspace) + "/points",
+               _clean(circuit=circuit, kind=kind, label=label, room=room))
+
+
+@server.tool()
+def place(workspace: str, item: str, room: str) -> dict:
+    """Say which room an item is in."""
+    return act(f"Place {item} in {room}", "POST", _ws(workspace) + f"/items/{_q(item)}/place", {"room": room})
+
+
+@server.tool()
+def rename(workspace: str, item: str, label: str) -> dict:
+    """Give an item a new label."""
+    return act(f"Rename {item} to “{label}”", "POST", _ws(workspace) + f"/items/{_q(item)}/rename",
+               {"label": label})
+
+
+@server.tool()
+def set_reference(workspace: str, item: str, partner: str, reference: str) -> dict:
+    """The partner article for an item (a board, RCD, breaker, device or
+    point), so the BOM can price it. Find it with partner_search()."""
+    return act(f"Use {partner} {reference} for {item}", "POST",
+               _ws(workspace) + f"/items/{_q(item)}/reference", {"partner": partner, "reference": reference})
+
+
+@server.tool()
+def remove(workspace: str, item: str) -> dict:
+    """Remove an item. A circuit takes its breaker and points with it; an RCD
+    or a board is refused while something still hangs on it."""
+    return act(f"Remove {item}", "DELETE", _ws(workspace) + f"/items/{_q(item)}", {})
 
 
 def main() -> int:

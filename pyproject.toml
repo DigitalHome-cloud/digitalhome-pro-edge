@@ -20,7 +20,7 @@ classifiers = [
 # engine.py is standard library only. Flask is the web page's, and mcp
 # is the agent server's; every console script below is installed, so
 # these are dependencies rather than optional extras.
-dependencies = ["flask>=3.0", "mcp>=2,<3", "rdflib>=7.0", "pyshacl>=0.26"]
+dependencies = ["flask>=3.0", "mcp>=2,<3", "rdflib>=7.0", "pyshacl>=0.26", "segno>=1.6"]
 
 [project.urls]
 Homepage = "https://github.com/DigitalHome-cloud/digitalhome-pro-edge"
@@ -41,7 +41,7 @@ packages = ["digitalhome_pro_edge", "digitalhome_pro_edge.core", "digitalhome_pr
 # installed alongside the code. skill/ ships so an install can hand the agent
 # skill over without the repository. tests/test_core.py checks this list.
 [tool.setuptools.package-data]
-"digitalhome_pro_edge.edge" = ["static/*", "ontology/*/*.ttl", "ontology/*.ttl"]  # edge layer
+"digitalhome_pro_edge.edge" = ["static/*", "ontology/*/*.ttl", "ontology/*.ttl", "ontology/*/*.json"]  # edge layer
 digitalhome_pro_edge = ["VERSION", "templates/*.html", "static/*", "skill/*.md", "shared/*.json"]
 "digitalhome_pro_edge.core" = ["static/*", "templates/core/*.html"]
 

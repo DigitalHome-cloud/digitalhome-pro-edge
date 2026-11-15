@@ -4,3 +4,5 @@ mcp>=2,<3
 # edge layer
 rdflib>=7.0
 pyshacl>=0.26
+# designs: QR codes on the labels
+segno>=1.6

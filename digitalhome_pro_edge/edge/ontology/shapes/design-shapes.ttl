@@ -1,0 +1,85 @@
+@prefix dhc:   <https://digitalhome.cloud/ontology#> .
+@prefix dhp:   <https://digitalhome.cloud/pro#> .
+@prefix dhpsh: <https://digitalhome.cloud/pro/shapes#> .
+@prefix rec:   <https://w3id.org/rec#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix sh:    <http://www.w3.org/ns/shacl#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+
+# ============================================================
+# Structural shapes of a design (ADR-0001). These REFUSE a save: a design
+# that breaks them is not a design but a broken file. Whether a design meets
+# a norm is a different question, answered by the advisory shapes in cbox/
+# and reported, never refused — a design that breaks NF C 15-100 must be
+# saveable so that it can be shown and fixed.
+#
+# Owned by this edge for now; they belong in darkfactory repos/core/schema
+# once the Designer writes the same structure.
+# ============================================================
+
+dhpsh:Labelled a sh:NodeShape ;
+    sh:property [ sh:path rdfs:label ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:message "Everything in a design has one label."@en ] .
+
+dhpsh:WorkspaceShape a sh:NodeShape ;
+    sh:targetClass dhp:Workspace ;
+    sh:node dhpsh:Labelled ;
+    sh:property [ sh:path dhp:home ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ;
+                  sh:message "A workspace belongs to one home."@en ] ;
+    sh:property [ sh:path dhp:status ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:in ( "active" "quoted" "done" "archived" ) ;
+                  sh:message "A workspace's status is active, quoted, done or archived."@en ] .
+
+dhpsh:BoardShape a sh:NodeShape ;
+    sh:targetClass dhc:DistributionBoard ;
+    sh:node dhpsh:Labelled ;
+    sh:property [ sh:path dhp:rows ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ;
+                  sh:minInclusive 1 ; sh:message "A board has a number of rows (≥ 1)."@en ] ;
+    sh:property [ sh:path dhp:modulesPerRow ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ;
+                  sh:minInclusive 1 ; sh:message "A board has a number of modules per row (≥ 1)."@en ] .
+
+dhpsh:OnBoard a sh:NodeShape ;
+    sh:property [ sh:path dhp:onBoard ; sh:minCount 1 ; sh:maxCount 1 ; sh:class dhc:DistributionBoard ;
+                  sh:message "A device sits on exactly one board of this design."@en ] ;
+    sh:property [ sh:path dhp:modules ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ;
+                  sh:message "A device takes a whole number of modules."@en ] .
+
+dhpsh:RCDShape a sh:NodeShape ;
+    sh:targetClass dhc:RCD ;
+    sh:node dhpsh:Labelled , dhpsh:OnBoard ;
+    sh:property [ sh:path dhc:ratedCurrent ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:decimal ;
+                  sh:message "An RCD has one rated current."@en ] ;
+    sh:property [ sh:path dhc:sensitivityMA ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:decimal ;
+                  sh:message "An RCD has one sensitivity in mA."@en ] ;
+    sh:property [ sh:path dhc:rcdType ; sh:minCount 1 ; sh:maxCount 1 ; sh:in ( "AC" "A" "F" "B" ) ;
+                  sh:message "An RCD's type is AC, A, F or B."@en ] .
+
+dhpsh:DeviceShape a sh:NodeShape ;
+    sh:targetClass dhc:ProtectionDevice , dhc:Contactor , dhc:SurgeProtector ;
+    sh:node dhpsh:Labelled , dhpsh:OnBoard .
+
+dhpsh:CircuitShape a sh:NodeShape ;
+    sh:targetClass dhc:Circuit ;
+    sh:node dhpsh:Labelled ;
+    sh:property [ sh:path dhc:hasCircuitType ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:message "A circuit has one circuit type."@en ] ;
+    sh:property [ sh:path dhc:ratedCurrent ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:decimal ;
+                  sh:message "A circuit has one rated current."@en ] ;
+    sh:property [ sh:path dhc:crossSection ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:decimal ;
+                  sh:message "A circuit has one wire cross-section in mm²."@en ] ;
+    sh:property [ sh:path dhc:maxPoints ; sh:maxCount 1 ; sh:datatype xsd:integer ;
+                  sh:message "A circuit has at most one number of points."@en ] ;
+    sh:property [ sh:path dhc:hasProtection ; sh:minCount 1 ;
+                  sh:message "A circuit is protected by at least its own breaker."@en ] .
+
+dhpsh:RoomShape a sh:NodeShape ;
+    sh:targetClass rec:Room ;
+    sh:node dhpsh:Labelled .
+
+dhpsh:PointShape a sh:NodeShape ;
+    sh:targetClass dhp:Point ;
+    sh:node dhpsh:Labelled ;
+    sh:property [ sh:path dhp:onCircuit ; sh:minCount 1 ; sh:maxCount 1 ; sh:class dhc:Circuit ;
+                  sh:message "A point is on exactly one circuit."@en ] ;
+    sh:property [ sh:path rec:locatedIn ; sh:maxCount 1 ; sh:class rec:Room ;
+                  sh:message "A point is in at most one room."@en ] .
