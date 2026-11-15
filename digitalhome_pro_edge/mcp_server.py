@@ -72,7 +72,8 @@ def _clean(**kw) -> dict:
 
 @server.tool()
 def selection() -> dict:
-    """What the person has open on the page: a workspace, and an item in it."""
+    """What the person has open on the page: a workspace, an item in it, and
+    the file they last dropped for you (read it with read_file)."""
     return _get("/api/selection")
 
 
@@ -107,10 +108,78 @@ def bom(workspace: str) -> dict:
 
 
 @server.tool()
-def partners() -> list:
-    """Each manufacturer or distributor: which channel is in use (api, file or
-    none), what is possible, and the imported file if any. Never credentials."""
+def partners() -> dict:
+    """The person's partners (manufacturers, distributors, wholesalers) and,
+    for each, the channel in use (api, file or none) and the imported file;
+    also where the list is kept (this computer or the cloud), the API
+    connectors and the file formats this edge reads. Never credentials."""
     return _get("/api/partners")
+
+
+@server.tool()
+def add_partner(id: str, name: str, kind: str = "distributor", formats: list[str] | None = None,  # noqa: A002
+                api: str = "", note: str = "", markets: list[str] | None = None) -> dict:
+    """Add a partner to the person's private list: an id (lowercase, e.g.
+    "acme-elec"), its name, kind (manufacturer, distributor, wholesaler), the
+    file formats it delivers (csv, bmecat, datanorm) and an API connector if
+    one exists, and the markets its articles are sold for by default (EU, FR,
+    DE …). Credentials and files are set up on the page, never here."""
+    return act(f"Add partner “{name}”", "POST", "/api/partners",
+               _clean(id=id, name=name, kind=kind, formats=formats or ["csv"], api=api, note=note,
+                      markets=markets or None))
+
+
+@server.tool()
+def inbox() -> list:
+    """Files the person gave the chat on the page, newest first: id, name,
+    size, the kind found in its content (bmecat, datanorm, csv, xlsx, turtle,
+    json, pdf, quote, text) and a short note. selection() names the one just
+    dropped."""
+    return _get("/api/inbox")
+
+
+@server.tool()
+def read_file(file: str, offset: int = 0, limit: int = 20000) -> dict:
+    """The text of an inbox file, in slices (more=true: read on from
+    offset+limit). A PDF is its extracted text, a workbook its first sheet as
+    semicolon-separated rows. Decide from the content what it is for:
+    articles → import_file_to_partner; a quote, a plan, a description or a
+    model → propose the design changes it implies with the design tools, one
+    by one, and say which facts came from the file."""
+    return _get(f"/api/inbox/{_q(file)}?offset={int(offset)}&limit={int(limit)}")
+
+
+@server.tool()
+def import_file_to_partner(file: str, partner: str, fmt: str = "") -> dict:
+    """Propose importing an inbox file's articles for a registered partner
+    (csv, bmecat, datanorm, or a workbook read as csv). Prices stay private
+    on this computer; the product facts go into the partner's catalogue."""
+    return act(f"Import {file} for {partner}", "POST", f"/api/inbox/{_q(file)}/import-partner",
+               _clean(partner=partner, fmt=fmt))
+
+
+@server.tool()
+def article(partner: str, reference: str, norm: str = "") -> dict:
+    """An article in a partner's catalogue: its label, the markets it is sold
+    for (EU, FR …), the installation norms it is approved for and the product
+    standards it meets; with a norm (e.g. nfc15100), whether it may be used
+    under it: yes, no or unknown, and why."""
+    q = f"reference={_q(reference)}" + (f"&norm={_q(norm)}" if norm else "")
+    return _get(f"/api/partners/{_q(partner)}/article?{q}")
+
+
+@server.tool()
+def set_article_norms(partner: str, reference: str, usable_in: list[str] | None = None,
+                      approved_for: list[str] | None = None, conforms_to: list[str] | None = None) -> dict:
+    """Say where an article may be used, from its datasheet: markets (EU, FR,
+    BE, DE …), installation norms it is approved for (nfc15100 …) and product
+    standards (EN 61008-1 …). A list you pass replaces that fact; one you
+    leave out stays. The report then warns when a design uses it elsewhere."""
+    body = {"reference": reference}
+    for k, v in (("usable_in", usable_in), ("approved_for", approved_for), ("conforms_to", conforms_to)):
+        if v is not None:
+            body[k] = v
+    return act(f"Norms of {partner} {reference}", "POST", f"/api/partners/{_q(partner)}/article", body)
 
 
 @server.tool()

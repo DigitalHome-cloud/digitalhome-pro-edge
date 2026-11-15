@@ -120,52 +120,139 @@ async function drawBom() {
 // ---------------------------------------------------------- partners ----
 
 async function drawPartners() {
-  const list = await core.api("GET", "/api/partners");
-  const key = JSON.stringify(list);
+  const got = await core.api("GET", "/api/partners");
+  const key = JSON.stringify(got);
   if (S.seen.partners === key) return;
   S.seen.partners = key;
-  $("#tab-partners").innerHTML = `<p class="sub">Product data and prices come from each partner's API when
-      this edge has access to it, otherwise from a data exchange file you import. Both stay on this computer.</p>` +
-    list.map((p) => `<section class="partner" data-p="${esc(p.partner)}">
-      <header><b>${esc(p.name)}</b><span class="use">${esc(p.use)}</span></header>
+  const again = () => { S.seen.partners = null; drawPartners(); };
+  const fail = (err) => core.toast((err.errors || ["failed"]).join("; "));
+  const st = got.store;
+  $("#tab-partners").innerHTML = `
+    <p class="sub">Your partners and their API access are private: kept on this computer or in the
+      connected digitalhome.cloud, never in the repository. Imported files and prices stay on this computer.</p>
+    <form class="store">Keep the list and credentials
+      <select name="where"><option value="local" ${st.where === "local" ? "selected" : ""}>on this computer</option>
+        <option value="cloud" ${st.where === "cloud" ? "selected" : ""}>in the connected cloud</option></select>
+      <button>Move</button></form>` +
+    got.partners.map((p) => `<section class="partner" data-p="${esc(p.partner)}">
+      <header><b>${esc(p.name)}</b> <small>${esc(p.kind)}</small><span class="use">${esc(p.use)}</span></header>
       ${p.note ? `<p class="note">${esc(p.note)}</p>` : ""}
       ${p.file ? `<p class="note">File: ${esc(p.file.name || p.file.format)} · ${p.file.articles} articles</p>` : ""}
       <form class="imp"><input type="file" name="file" required>
         <select name="format">${p.formats.map((f) => `<option>${esc(f)}</option>`).join("")}</select>
         <button>Import</button></form>
-      ${p.api_possible ? `<form class="cred">
+      ${p.api ? `<form class="cred">
         <input type="text" name="client_id" placeholder="client id" autocomplete="off">
         <input type="password" name="client_secret" placeholder="client secret" autocomplete="off">
         <input type="text" name="supplier_id" placeholder="supplier id">
         <input type="text" name="customer_id" placeholder="customer id">
         <button>${p.api_configured ? "Replace" : "Use the API"}</button>
-        ${p.api_configured ? '<button type="button" class="forget danger">Forget</button>' : ""}</form>` : ""}
-    </section>`).join("");
-  document.querySelectorAll(".partner").forEach((sec) => {
+        ${p.api_configured ? '<button type="button" class="forget">Forget</button>' : ""}</form>` : ""}
+      <button type="button" class="drop danger">Remove partner</button>
+    </section>`).join("") + `
+    <details class="partner"><summary>Add a partner</summary>
+      <form class="add">
+        <input type="text" name="id" placeholder="id, e.g. acme-elec" required pattern="[a-z][a-z0-9-]{0,39}">
+        <input type="text" name="name" placeholder="name" required>
+        <select name="kind"><option>distributor</option><option>manufacturer</option><option>wholesaler</option></select>
+        ${got.formats.map((f) => `<label><input type="checkbox" name="formats" value="${esc(f)}" ${f === "csv" ? "checked" : ""}> ${esc(f)}</label>`).join("")}
+        <select name="api"><option value="">no API</option>${got.connectors.map((c) => `<option>${esc(c)}</option>`).join("")}</select>
+        <button class="primary">Add</button></form></details>`;
+  const box = $("#tab-partners");
+  box.querySelector("form.store").onsubmit = async (e) => {
+    e.preventDefault();
+    try { await core.api("POST", "/api/partners/store", { where: e.target.where.value }); core.toast("Moved"); }
+    catch (err) { fail(err); }
+    again();
+  };
+  box.querySelector("form.add").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      await core.api("POST", "/api/partners", { id: f.get("id"), name: f.get("name"), kind: f.get("kind"),
+                                               formats: f.getAll("formats"), api: f.get("api") });
+    } catch (err) { fail(err); }
+    again();
+  };
+  box.querySelectorAll("section.partner").forEach((sec) => {
     const p = sec.dataset.p;
     sec.querySelector("form.imp").onsubmit = async (e) => {
       e.preventDefault();
       const res = await fetch(`/api/partners/${encodeURIComponent(p)}/import`, { method: "POST", body: new FormData(e.target) });
-      const got = await res.json().catch(() => ({}));
-      core.toast(res.ok ? `${got.articles} articles imported, ${got.priced} with a price` : (got.errors || ["failed"]).join("; "));
-      S.seen.partners = null; drawPartners();
+      const r = await res.json().catch(() => ({}));
+      core.toast(res.ok ? `${r.articles} articles imported, ${r.priced} with a price` : (r.errors || ["failed"]).join("; "));
+      again();
+    };
+    sec.querySelector(".drop").onclick = async () => {
+      try { await core.api("DELETE", `/api/partners/${encodeURIComponent(p)}`); } catch (err) { fail(err); }
+      again();
     };
     const cred = sec.querySelector("form.cred");
     if (cred) {
       cred.onsubmit = async (e) => {
         e.preventDefault();
         try {
-          await core.api("POST", `/api/partners/${encodeURIComponent(p)}/credentials`, Object.fromEntries(new FormData(cred)));
-          core.toast("Saved on this computer");
-        } catch (err) { core.toast(err.errors.join("; ")); }
-        S.seen.partners = null; drawPartners();
+          const r = await core.api("POST", `/api/partners/${encodeURIComponent(p)}/credentials`, Object.fromEntries(new FormData(cred)));
+          core.toast(r.where === "cloud" ? "Saved in the connected cloud" : "Saved on this computer");
+        } catch (err) { fail(err); }
+        again();
       };
       const f = cred.querySelector(".forget");
       if (f) f.onclick = async () => {
         await core.api("DELETE", `/api/partners/${encodeURIComponent(p)}/credentials`);
-        S.seen.partners = null; drawPartners();
+        again();
       };
     }
+  });
+}
+
+// --------------------------------------------------------------- files ----
+//
+// Files given to the chat. Dropping one makes it the chat's selection; the
+// chat reads it and proposes what to do with it (inbox.py).
+
+async function upload(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch("/api/inbox", { method: "POST", body: fd });
+  const r = await res.json().catch(() => ({}));
+  core.toast(res.ok ? `${r.name}: ${r.note} — ask the chat what to do with it` : (r.errors || ["failed"]).join("; "));
+  S.seen.files = null;
+  refresh();
+}
+
+async function drawFiles() {
+  const got = await core.api("GET", "/api/inbox");
+  const key = JSON.stringify(got);
+  if (S.seen.files === key) return;
+  S.seen.files = key;
+  const box = $("#tab-files");
+  box.innerHTML = `
+    <p class="sub">Give the chat a file — a price list, a catalogue, a quote, a spreadsheet, a model — and it
+      reads it and proposes what to do with it. Files stay on this computer.</p>
+    <label class="dropzone"><input type="file" multiple hidden>
+      <span>Drop files here, or click to choose</span></label>
+    ${got.length ? `<table class="files"><thead><tr><th>File</th><th>What it is</th><th class="num">Size</th><th></th></tr></thead><tbody>
+      ${got.map((f) => `<tr data-f="${esc(f.id)}"><td>${esc(f.name)}</td><td><b>${esc(f.kind)}</b> · ${esc(f.note)}</td>
+        <td class="num">${f.size < 1024 ? `${f.size} B` : `${(f.size / 1024).toFixed(0)} kB`}</td>
+        <td><button class="ask">Give to chat</button> <button class="drop">Remove</button></td></tr>`).join("")}
+      </tbody></table>` : `<p class="note">No files yet.</p>`}`;
+  const zone = box.querySelector(".dropzone");
+  const input = zone.querySelector("input");
+  input.onchange = () => [...input.files].forEach(upload);
+  zone.ondragover = (e) => { e.preventDefault(); zone.classList.add("over"); };
+  zone.ondragleave = () => zone.classList.remove("over");
+  zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove("over"); [...e.dataTransfer.files].forEach(upload); };
+  box.querySelectorAll("tr[data-f]").forEach((tr) => {
+    const f = tr.dataset.f;
+    tr.querySelector(".ask").onclick = async () => {
+      await core.api("POST", "/api/selection", { workspace: S.ws || "", item: S.item || "", file: f });
+      core.toast("The chat now has this file in view");
+    };
+    tr.querySelector(".drop").onclick = async () => {
+      try { await core.api("DELETE", `/api/inbox/${encodeURIComponent(f)}`); } catch (err) { core.toast((err.errors || ["failed"]).join("; ")); }
+      S.seen.files = null; refresh();
+    };
   });
 }
 
@@ -175,6 +262,7 @@ async function refresh() {
   try {
     await drawList();
     if (S.tab === "partners") return drawPartners();
+    if (S.tab === "files") return drawFiles();
     if (!S.ws) return;
     if (S.tab === "design") await drawDesign();
     if (S.tab === "report") await drawReport();

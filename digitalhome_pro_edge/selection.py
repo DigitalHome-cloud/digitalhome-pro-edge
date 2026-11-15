@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 D-LAB-5
-"""selection.py — what the page has open (a workspace, an item), for the chat."""
+"""selection.py — what the page has open (a workspace, an item, a file given to the chat)."""
 
 from __future__ import annotations
 
@@ -11,13 +11,15 @@ _lock = threading.Lock()
 _current: Dict[str, str] = {}
 
 
-def set(workspace: str = "", item: str = "") -> Dict[str, str]:  # noqa: A001 — module API
+def set(workspace: str = "", item: str = "", file: str = "") -> Dict[str, str]:  # noqa: A001 — module API
     with _lock:
         _current.clear()
         if workspace:
             _current["workspace"] = workspace
         if item:
             _current["item"] = item
+        if file:
+            _current["file"] = file
         return dict(_current)
 
 
@@ -28,4 +30,4 @@ def get() -> Dict[str, str]:
 
 def key():
     got = get()
-    return f"{got.get('workspace', '')}/{got.get('item', '')}" if got else None
+    return f"{got.get('workspace', '')}/{got.get('item', '')}/{got.get('file', '')}" if got else None

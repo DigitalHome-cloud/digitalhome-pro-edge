@@ -483,7 +483,7 @@ class Designs:
         g = self.kb.load(ws)
         if self._workspace_node(g) is None:
             raise NotFound(f"no workspace {ws}")
-        findings = self._norm_findings(g, lang) + self._board_findings(g, lang)
+        findings = self._norm_findings(g, lang) + self._board_findings(g, lang) + self._article_findings(g, lang)
         return {"workspace": ws, "conforms": not any(f["severity"] == "violation" for f in findings),
                 "findings": findings}
 
@@ -561,6 +561,27 @@ class Designs:
             elif cap and Decimal(cap - used) / cap < RESERVE:
                 add("warning", "board-reserve", b, "board_reserve", used=used, cap=cap,
                     free=cap - used, need=int((RESERVE * cap).to_integral_value(rounding="ROUND_CEILING")))
+        return out
+
+    def _article_findings(self, g: Graph, lang: str) -> List[Dict]:
+        """An article chosen for an item that its catalogue limits to other
+        markets or norms than this workspace's."""
+        from . import catalogue
+        ws = self._workspace_node(g)
+        norm = g.value(ws, DHC.governedBy)
+        country = str(g.value(ws, DHP.country) or "")
+        t = _texts(lang)
+        out = []
+        for n in set(g.subjects(DHP.reference, None)):
+            partner, ref = str(g.value(n, DHP.partner) or ""), str(g.value(n, DHP.reference))
+            if not partner:
+                continue
+            got = catalogue.usable(partner, ref, norm, country)
+            if got["status"] == "no":
+                out.append({"severity": "warning", "rule": "article-norm", "item": _local(n),
+                            "label": str(g.value(n, RDFS.label) or ""),
+                            "message": t["article_norm"].format(ref=ref, why=got["why"],
+                                                                where=str(norm).rsplit("_", 1)[-1] if norm else country)})
         return out
 
     # ---------------------------------------------------------------- BOM
@@ -667,6 +688,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "rcd_type_a": "This circuit needs an RCD of type A (or F, B); “{rcd}” is type AC.",
             "board_over": "The devices take {used} modules, the board has {cap}.",
             "board_reserve": "{used} of {cap} modules used, {free} free: about 20 % ({need}) should stay free for later circuits.",
+            "article_norm": "The article {ref} is {why} in its catalogue, not cleared for this workspace ({where}).",
         },
         "fr": {
             "rcd_count": "La NF C 15-100 demande au moins deux interrupteurs différentiels 30 mA ; ce projet en a {n}. Avec un seul, un défaut sur n'importe quel circuit coupe toute l'installation.",
@@ -675,6 +697,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "rcd_type_a": "Ce circuit demande un différentiel de type A (ou F, B) ; « {rcd} » est de type AC.",
             "board_over": "Les appareils occupent {used} modules, le tableau en a {cap}.",
             "board_reserve": "{used} modules occupés sur {cap}, {free} libres : environ 20 % ({need}) doivent rester libres pour les extensions.",
+            "article_norm": "L'article {ref} est, selon son catalogue, {why} ; il n'est pas validé pour ce projet ({where}).",
         },
         "de": {
             "rcd_count": "Die NF C 15-100 verlangt mindestens zwei FI-Schutzschalter 30 mA; dieser Entwurf hat {n}. Mit einem schaltet ein Fehler in irgendeinem Stromkreis das ganze Haus ab.",
@@ -683,6 +706,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "rcd_type_a": "Dieser Stromkreis braucht einen FI Typ A (oder F, B); „{rcd}“ ist Typ AC.",
             "board_over": "Die Geräte belegen {used} Teilungseinheiten, der Verteiler hat {cap}.",
             "board_reserve": "{used} von {cap} Teilungseinheiten belegt, {free} frei: etwa 20 % ({need}) sollten für spätere Stromkreise frei bleiben.",
+            "article_norm": "Der Artikel {ref} ist laut Katalog {why}; für dieses Projekt ({where}) ist er nicht freigegeben.",
         },
     }
     return t.get(lang, t["en"])

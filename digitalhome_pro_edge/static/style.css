@@ -59,3 +59,13 @@ table.bom .missing { color: var(--muted); font-size: 11px; }
 .partner form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: 12px; }
 .partner input[type=text], .partner input[type=password] { width: 150px; }
 a.btn { text-decoration: none; }
+.partner .drop { margin-top: 8px; font-size: 12px; }
+.partner summary { cursor: pointer; font-weight: 600; }
+form.store { display: flex; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 12px; }
+
+/* files given to the chat */
+.dropzone { display: block; border: 2px dashed var(--line, #bbb); border-radius: 8px; padding: 24px;
+            text-align: center; cursor: pointer; margin: 12px 0; }
+.dropzone.over { background: var(--hover, rgba(0, 0, 0, .04)); }
+table.files { width: 100%; border-collapse: collapse; }
+table.files td, table.files th { padding: 6px 8px; border-bottom: 1px solid var(--line, #ddd); text-align: left; }

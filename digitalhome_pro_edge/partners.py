@@ -1,21 +1,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 D-LAB-5
 """
-partners.py — manufacturers and distributors as sources of product data and
-prices, through whichever channel each one offers (ADR-0002):
+partners.py — manufacturers, distributors and wholesalers as sources of
+product data and prices, through whichever channel each one offers
+(ADR-0002):
 
   api   a partner API, when this edge has credentials for it
-        (Schneider Electric's partner APIs: catalogue, net price)
-  file  a data exchange file someone imported: BMEcat with ETIM (Hager,
-        Schneider …), Datanorm 4 (German wholesalers), or a plain CSV price
-        list (any distributor's export)
+  file  a data exchange file someone imported: BMEcat with ETIM, Datanorm 4,
+        or a CSV price list (any distributor's export)
 
-capability(partner) says which one is in use: the API when it is configured,
-else the newest imported file, else what could be set up.
+WHO the partners are is private: the register (each partner's id, name,
+kind, formats and API connector) and the API credentials are kept either on
+this computer or in the connected digitalhome.cloud instance, never in the
+repository. The code only knows the CONNECTORS — how to talk to a partner
+API — and the FILE FORMATS it reads.
 
-What a partner tells this edge is commercial and private: net prices,
-customer numbers, credentials. It lives in the data folder (0700/0600), never
-in the repository, and credentials never pass through the chat or MCP.
+Imported files (articles and net prices) stay on this computer, in the data
+folder (0700/0600). Credentials never pass through the chat or MCP.
 """
 
 from __future__ import annotations
@@ -33,23 +34,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+from .edge import cloud
 from .edge import knowledge as kn
 
-# What each partner offers, as far as is public. Formats this edge reads:
 FORMATS = ("csv", "bmecat", "datanorm")
-PARTNERS: Dict[str, Dict] = {
-    "schneider": {"name": "Schneider Electric", "api": "schneider",
-                  "files": ["bmecat", "csv"],
-                  "note": "Partner APIs (catalogue with ETIM, net price, availability) need a partner "
-                          "account and OAuth client credentials from Schneider."},
-    "hager": {"name": "Hager", "api": None, "files": ["bmecat", "csv"],
-              "note": "No public API; ETIM catalogue files in BMEcat from the Hager download centre."},
-    "legrand": {"name": "Legrand", "api": None, "files": ["bmecat", "csv"], "note": ""},
-    "wholesaler-de": {"name": "German wholesaler", "api": None, "files": ["datanorm", "csv"],
-                      "note": "Datanorm price files from the wholesaler, with your customer number."},
-    "distributor": {"name": "Distributor price list", "api": None, "files": ["csv"],
-                    "note": "Any distributor's export as CSV: reference, description, price."},
-}
+KINDS = ("manufacturer", "distributor", "wholesaler")
 _ID = re.compile(r"[a-z][a-z0-9-]{0,39}")
 
 
@@ -112,7 +101,10 @@ def parse_csv(data: bytes) -> List[Dict]:
              "description": ("description", "designation", "désignation", "libelle", "libellé", "kurztext"),
              "price": ("price", "prix", "preis", "net", "tarif", "tarifd"),
              "ean": ("ean", "gtin"), "etim": ("etim", "etim_class", "class"),
-             "currency": ("currency", "devise", "währung"), "unit": ("unit", "unité", "einheit")}
+             "currency": ("currency", "devise", "währung"), "unit": ("unit", "unité", "einheit"),
+             "norms": ("norms", "norm", "normes", "norme", "normen"),
+             "markets": ("markets", "market", "region", "marchés", "märkte", "pays", "country"),
+             "standards": ("standards", "standard", "conformité", "konformität")}
     out = []
     for row in rows:
         low = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
@@ -198,16 +190,20 @@ def parse_datanorm(data: bytes) -> List[Dict]:
 PARSERS = {"csv": parse_csv, "bmecat": parse_bmecat, "datanorm": parse_datanorm}
 
 
-def import_file(partner: str, fmt: str, data: bytes, name: str = "") -> Dict:
-    partner = _check(partner)
+def import_file(pid: str, fmt: str, data: bytes, name: str = "") -> Dict:
+    pid = _check(pid)
+    if partner(pid) is None:
+        raise ValueError(f"{pid} is not in the partner list")
     if fmt not in PARSERS:
         raise ValueError(f"format is one of {', '.join(FORMATS)}")
     items = PARSERS[fmt](data)
     if not items:
         raise ValueError(f"no articles found in this {fmt} file")
-    _write(_dir() / f"{partner}.items.json",
-           {"partner": partner, "format": fmt, "file": name, "imported": int(time.time()), "items": items})
-    return {"partner": partner, "format": fmt, "articles": len(items),
+    _write(_dir() / f"{pid}.items.json",
+           {"partner": pid, "format": fmt, "file": name, "imported": int(time.time()), "items": items})
+    from . import catalogue
+    catalogue.write_articles(pid, items, partner(pid).get("markets") or [])
+    return {"partner": pid, "format": fmt, "articles": len(items),
             "priced": sum(1 for i in items if i.get("price"))}
 
 
@@ -215,33 +211,162 @@ def _items(partner: str) -> Optional[Dict]:
     return _read(_dir() / f"{_check(partner)}.items.json", None)
 
 
-# -------------------------------------------------------------- the APIs ----
+# --------------------------------------------- the private store ----
+#
+# The register and the credentials live in ONE place, chosen on the page:
+# "local" (the data folder) or "cloud" (the connected digitalhome.cloud
+# instance, through the edge API: /edge/v1/partners/…). The cloud keeps them
+# for the home, so a second edge of the same home sees the same partners.
+
+def _store_path() -> Path:
+    return _dir() / "store.json"
+
+
+def store() -> Dict:
+    got = _read(_store_path(), {})
+    return {"where": got.get("where", "local"), "profile": got.get("profile", "")}
+
+
+def set_store(where: str, profile: str = "") -> Dict:
+    """Move the register and credentials to `where` (local or cloud). What is
+    stored at the old place is copied over first, then removed there."""
+    if where not in ("local", "cloud"):
+        raise ValueError("where is local or cloud")
+    old = store()
+    if old["where"] == where and old.get("profile", "") == profile:
+        return old
+    register, creds = _get_register(), {p["id"]: _get_credentials(p["id"]) for p in _get_register()}
+    _write(_store_path(), {"where": where, "profile": profile})
+    try:
+        _put_register(register)
+        for pid, values in creds.items():
+            if values:
+                _put_credentials(pid, values)
+    except Exception:
+        _write(_store_path(), old)               # the new place refused: stay where we were
+        raise
+    if old["where"] == "local":
+        for p in _dir().glob("*.credentials.json"):
+            p.unlink()
+        _store_file("register").unlink(missing_ok=True)
+    else:                                        # clear the cloud copy, so nothing lingers there
+        new = store()
+        _write(_store_path(), old)
+        try:
+            for pid in creds:
+                _put_credentials(pid, None)
+            _put_register([])
+        finally:
+            _write(_store_path(), new)
+    return store()
+
+
+def _store_file(name: str) -> Path:
+    return _dir() / f"{name}.json"
+
+
+def _cloud(path: str, body: Dict) -> Dict:
+    try:
+        return cloud.call(f"partners/{path}", body, store()["profile"] or None)
+    except cloud.CloudError as e:
+        if e.status == 404:
+            raise ValueError("the connected cloud does not keep partner data yet "
+                             "(it needs /edge/v1/partners); keep it on this computer for now") from e
+        raise
+
+
+def _get_register() -> List[Dict]:
+    if store()["where"] == "cloud":
+        return list(_cloud("get", {}).get("partners") or [])
+    return list(_read(_store_file("register"), []))
+
+
+def _put_register(register: List[Dict]) -> None:
+    if store()["where"] == "cloud":
+        _cloud("put", {"partners": register})
+    else:
+        _write(_store_file("register"), register)
+
 
 def _cred_path(partner: str) -> Path:
     return _dir() / f"{_check(partner)}.credentials.json"
 
 
-def set_credentials(partner: str, values: Dict) -> Dict:
+def _get_credentials(partner: str) -> Optional[Dict]:
+    if store()["where"] == "cloud":
+        return _cloud("credentials/get", {"partner": partner}).get("values") or None
+    return _read(_cred_path(partner), None)
+
+
+def _put_credentials(partner: str, values: Optional[Dict]) -> None:
+    if store()["where"] == "cloud":
+        _cloud("credentials/put", {"partner": partner, "values": values})
+    elif values is None:
+        _cred_path(partner).unlink(missing_ok=True)
+    else:
+        _write(_cred_path(partner), values)
+
+
+def register() -> List[Dict]:
+    return sorted(_get_register(), key=lambda p: p["id"])
+
+
+def partner(pid: str) -> Optional[Dict]:
+    pid = _check(pid)
+    return next((p for p in _get_register() if p["id"] == pid), None)
+
+
+def add_partner(id: str, name: str, kind: str = "distributor", formats: Optional[List[str]] = None,  # noqa: A002
+                api: str = "", note: str = "", markets: Optional[List[str]] = None) -> Dict:
+    """Add or replace a partner in the private register."""
+    pid = _check(id)
+    if kind not in KINDS:
+        raise ValueError(f"kind is one of {', '.join(KINDS)}")
+    formats = [f for f in (formats or ["csv"]) if f]
+    bad = [f for f in formats if f not in FORMATS]
+    if bad:
+        raise ValueError(f"unknown format {', '.join(bad)}; one of {', '.join(FORMATS)}")
+    if api and api not in CONNECTORS:
+        raise ValueError(f"no API connector {api}; one of {', '.join(CONNECTORS) or 'none'}")
+    entry = {"id": pid, "name": (name or pid).strip(), "kind": kind, "formats": formats,
+             "api": api, "note": (note or "").strip(),
+             "markets": sorted({m.strip().upper() for m in (markets or []) if m.strip()})}
+    reg = [p for p in _get_register() if p["id"] != pid] + [entry]
+    _put_register(reg)
+    return entry
+
+
+def remove_partner(pid: str) -> Dict:
+    pid = _check(pid)
+    _put_register([p for p in _get_register() if p["id"] != pid])
+    _put_credentials(pid, None)
+    (_dir() / f"{pid}.items.json").unlink(missing_ok=True)
+    (_dir() / f"{pid}.catalogue.ttl").unlink(missing_ok=True)
+    return {"removed": pid}
+
+
+def set_credentials(partner_id: str, values: Dict) -> Dict:
     """Store a partner API's credentials (from the page, never the chat)."""
-    partner = _check(partner)
-    if not (PARTNERS.get(partner) or {}).get("api"):
-        raise ValueError(f"{partner} has no API this edge can use")
-    keep = {k: str(v).strip() for k, v in values.items()
-            if k in SchneiderClient.FIELDS and str(v).strip()}
-    missing = [k for k in SchneiderClient.REQUIRED if k not in keep]
+    p = partner(partner_id)
+    if p is None:
+        raise ValueError(f"{partner_id} is not in the partner list")
+    conn = CONNECTORS.get(p.get("api") or "")
+    if conn is None:
+        raise ValueError(f"{p['name']} has no API connector")
+    keep = {k: str(v).strip() for k, v in values.items() if k in conn.FIELDS and str(v).strip()}
+    missing = [k for k in conn.REQUIRED if k not in keep]
     if missing:
         raise ValueError("missing: " + ", ".join(missing))
-    _write(_cred_path(partner), keep)
-    return {"partner": partner, "configured": True}
+    _put_credentials(p["id"], keep)
+    return {"partner": p["id"], "configured": True, "where": store()["where"]}
 
 
-def forget_credentials(partner: str) -> Dict:
-    try:
-        _cred_path(partner).unlink()
-    except FileNotFoundError:
-        pass
-    return {"partner": partner, "configured": False}
+def forget_credentials(partner_id: str) -> Dict:
+    _put_credentials(_check(partner_id), None)
+    return {"partner": partner_id, "configured": False}
 
+
+# -------------------------------------------------------------- the APIs ----
 
 class SchneiderClient:
     """Schneider Electric's partner APIs, OAuth2 client credentials.
@@ -315,34 +440,40 @@ def _find_number(data, keys: Iterable[str]) -> Optional[str]:
     return None
 
 
-def client(partner: str):
-    cfg = _read(_cred_path(partner), None)
-    api = (PARTNERS.get(partner) or {}).get("api")
-    if not cfg or not api:
-        raise NotConfigured(f"no API credentials for {partner}")
-    return SchneiderClient(cfg)
+# The API connectors this edge knows: how to talk to a partner API. Which
+# partner uses one is in the private register.
+CONNECTORS = {"schneider": SchneiderClient}
+
+
+def client(partner_id: str):
+    p = partner(partner_id)
+    conn = CONNECTORS.get((p or {}).get("api") or "")
+    cfg = _get_credentials(partner_id) if conn else None
+    if not cfg:
+        raise NotConfigured(f"no API credentials for {partner_id}")
+    return conn(cfg)
 
 
 # ------------------------------------------------------- what is in use ----
 
-def capability(partner: str) -> Dict:
-    partner = _check(partner)
-    known = PARTNERS.get(partner, {"name": partner, "api": None, "files": ["csv"], "note": ""})
-    has_api = bool(known.get("api")) and _cred_path(partner).exists()
-    items = _items(partner)
+def capability(partner_id: str) -> Dict:
+    p = partner(partner_id)
+    if p is None:
+        raise ValueError(f"{partner_id} is not in the partner list")
+    has_api = bool(p.get("api")) and bool(_get_credentials(p["id"]))
+    items = _items(p["id"])
     use = "api" if has_api else ("file" if items else "none")
-    return {"partner": partner, "name": known["name"], "use": use,
-            "api_possible": bool(known.get("api")), "api_configured": has_api,
-            "formats": known["files"], "note": known.get("note", ""),
+    return {"partner": p["id"], "name": p["name"], "kind": p.get("kind", ""), "use": use,
+            "api": p.get("api", ""), "api_configured": has_api, "formats": p.get("formats", ["csv"]),
+            "markets": p.get("markets", []),
+            "note": p.get("note", ""),
             "file": ({"format": items["format"], "name": items.get("file", ""), "articles": len(items["items"]),
                       "imported": items["imported"]} if items else None)}
 
 
-def capabilities() -> List[Dict]:
-    seen = set(PARTNERS)
-    for p in _dir().glob("*.items.json"):
-        seen.add(p.name.split(".", 1)[0])
-    return [capability(p) for p in sorted(seen)]
+def capabilities() -> Dict:
+    return {"store": store(), "connectors": sorted(CONNECTORS), "formats": list(FORMATS),
+            "partners": [capability(p["id"]) for p in register()]}
 
 
 def search(partner: str, query: str, limit: int = 20) -> List[Dict]:

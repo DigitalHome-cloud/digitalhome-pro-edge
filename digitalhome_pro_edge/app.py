@@ -20,7 +20,9 @@ import sys
 
 from flask import abort, jsonify, render_template, request
 
+from . import catalogue as cat
 from . import designs as dz
+from . import inbox as ib
 from . import labels as lb
 from . import partners as pt
 from . import selection as sel
@@ -94,7 +96,7 @@ def get_selection():
 
 @app.post("/api/selection")
 def set_selection():
-    return run(sel.set, **fields("workspace", "item"))
+    return run(sel.set, **fields("workspace", "item", "file"))
 
 
 @app.get("/api/homes")
@@ -150,7 +152,12 @@ def labels(ws: str):
         d = designs().design(ws)
     except dz.NotFound:
         abort(404)
-    return lb.sheet(d, request.host_url)
+    try:
+        skip = int(request.args.get("skip", 0))
+        module = float(request.args.get("module", lb.MODULE_MM))
+    except ValueError:
+        abort(400, "skip and module are numbers")
+    return lb.sheet(d, request.host_url, request.args.get("layout", "grid"), skip, module)
 
 
 @app.post("/api/workspaces/<ws>/boards")
@@ -217,12 +224,57 @@ def remove(ws: str, item: str):
 # ------------------------------------------------------------ partners ----
 #
 # Product data and prices per partner, by API or by file (partners.py). The
-# file import and the credentials come from the page only: neither is in the
-# chat's allowed calls, and credentials are never returned.
+# partner list and the credentials are private: kept on this computer or in
+# the connected cloud. The chat may propose adding a partner; file imports,
+# credentials and where they are stored come from the page only, and
+# credentials are never returned.
 
 @app.get("/api/partners")
 def partners():
     return run(pt.capabilities)
+
+
+@app.post("/api/partners")
+def add_partner():
+    return run(pt.add_partner, **fields("id", "name", "kind", "formats", "api", "note", "markets"))
+
+
+@app.delete("/api/partners/<partner>")
+def remove_partner(partner: str):
+    return run(pt.remove_partner, partner)
+
+
+@app.get("/api/partners/<partner>/catalogue.ttl")
+def partner_catalogue(partner: str):
+    if pt.partner(partner) is None:
+        abort(404)
+    return app.response_class(cat.turtle(partner), mimetype="text/turtle")
+
+
+@app.get("/api/partners/<partner>/article")
+def partner_article(partner: str):
+    ref = request.args.get("reference", "")
+    norm = request.args.get("norm", "")
+    def got():
+        art = cat.article(partner, ref)
+        if art is None:
+            raise dz.NotFound(f"{ref} is not in {partner}'s catalogue")
+        if norm:
+            art["usable"] = cat.usable(partner, ref, cat._norm(norm), request.args.get("country", ""))
+        return art
+    return run(got)
+
+
+@app.post("/api/partners/<partner>/article")
+def partner_set_article(partner: str):
+    if pt.partner(partner) is None:
+        return jsonify({"errors": [f"{partner} is not in the partner list"]}), 404
+    return run(cat.set_article, partner, **fields("reference", "usable_in", "approved_for", "conforms_to", "label"))
+
+
+@app.post("/api/partners/store")
+def partner_store():
+    return run(pt.set_store, **fields("where", "profile"))
 
 
 @app.get("/api/partners/<partner>/search")
@@ -252,6 +304,45 @@ def partner_credentials(partner: str):
 def partner_forget(partner: str):
     return run(pt.forget_credentials, partner)
 
+
+
+# --------------------------------------------------------------- inbox ----
+#
+# Files given to the chat (inbox.py, ADR-0004). Uploading is the person's act
+# on the page; the chat reads them and proposes what to do with them.
+
+@app.get("/api/inbox")
+def inbox_files():
+    return jsonify(ib.files())
+
+
+@app.post("/api/inbox")
+def inbox_add():
+    f = request.files.get("file")
+    if f is None:
+        return jsonify({"errors": ["send the file as multipart field 'file'"]}), 400
+    def added():
+        m = ib.add(f.filename or "", f.read())
+        cur = sel.get()
+        sel.set(cur.get("workspace", ""), cur.get("item", ""), m["id"])
+        return m
+    return run(added)
+
+
+@app.get("/api/inbox/<fid>")
+def inbox_read(fid: str):
+    return run(ib.read, fid, request.args.get("offset", 0, type=int),
+               request.args.get("limit", ib.TEXT_LIMIT, type=int))
+
+
+@app.delete("/api/inbox/<fid>")
+def inbox_remove(fid: str):
+    return run(ib.remove, fid)
+
+
+@app.post("/api/inbox/<fid>/import-partner")
+def inbox_import_partner(fid: str):
+    return run(ib.import_partner, fid, **fields("partner", "fmt"))
 
 
 # ------------------------------------------------------------------ main ----

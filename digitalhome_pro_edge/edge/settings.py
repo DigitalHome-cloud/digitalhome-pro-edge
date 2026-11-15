@@ -67,7 +67,10 @@ CHAT_ALLOWED: List[Tuple[str, str]] = [
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/circuits/circuit-[a-z0-9]{8}/move"),
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}/(place|rename|reference)"),
     ("DELETE", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}"),
-    # never here: partner file imports and credentials, which come from the page only
+    ("POST", r"/api/partners"),
+    ("POST", r"/api/partners/[a-z][a-z0-9-]{0,39}/article"),
+    ("POST", r"/api/inbox/in-[0-9a-f]{10}/import-partner"),
+    # never here: partner file imports, credentials and the store, which come from the page only
 ]
 
 CHAT_SYSTEM = """You are the chat of {title}, an edge of {cloud} where an
@@ -88,8 +91,19 @@ charging; lighting ≤ 16 A and 8 points in 1.5 mm²; sockets 16 A in 1.5 mm²
 20 % of a board's modules free. After a change, call report() and say what
 it finds; a design that breaks the norm is saved and shown, never refused.
 
-When someone brings a quote (devis), model what it offers in one workspace,
-report it, and propose a better design in another, with the reasons.
+The design is this chat plus the ontologies: the model graph is what you
+build; labels, materials, report and export are only outputs of it.
+
+Files the person drops on the page are in inbox(); selection() names the one
+just dropped. Read it with read_file() and decide from its content what it is
+for — never from its name alone. A price list, BMEcat, Datanorm or workbook
+of articles: import_file_to_partner() for the partner it comes from (ask
+which, if the file does not say). A quote (devis), a plan or a description:
+model what it states in a workspace, tool by tool, and say which facts came
+from the file and which you assumed. When someone brings a quote, model what
+it offers in one workspace, report it, and propose a better design in
+another, with the reasons. A datasheet that says where an article may be
+used: set_article_norms().
 
 Changes are proposals: a tool that changes something answers "proposed". The
 person sees a Confirm button for it. Never say a change is done before they
