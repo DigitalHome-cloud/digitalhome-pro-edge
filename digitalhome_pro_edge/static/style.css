@@ -187,3 +187,13 @@ table.history td.acts { white-space: nowrap; text-align: right; }
 .tag.frozen { border-color: var(--warn); }
 .tagging { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
 button.restore.sure { border-color: var(--danger); color: var(--danger); }
+
+.cloud-conf { border: 1px solid var(--edge); border-radius: 6px; padding: 10px 14px; margin: 0 0 14px; background: var(--panel); }
+.cloud-conf h3 { margin: 0 0 4px; font-size: 14px; }
+.c-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0; font-size: 13px; }
+.c-facts dt { color: var(--muted); }
+.c-versions, .c-options, .c-plan ul { list-style: none; padding: 0; margin: 6px 0; font-size: 13px; }
+.c-versions li.live b { color: var(--ok); }
+.c-versions li.legacy { color: var(--muted); }
+.c-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.c-acts form { display: flex; gap: 6px; }

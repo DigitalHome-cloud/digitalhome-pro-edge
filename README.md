@@ -62,6 +62,15 @@ before its modernisation: it can never be moved or removed. A survey may leave
 a circuit's rating or cable section unread. The circuit is then marked to
 verify and the report lists it as unchecked, never as compliant.
 
+A home's configurations live in digitalhome.cloud, keyed on the home's
+meaningless id (ADR-0010, from darkfactory ADRs 0018 and 0019). There is one
+live configuration, the versions before it (`<homeId>-MMMM-mmmm`) and
+planning options. In the History tab, **Cloud** publishes a survey as the
+first live configuration, creates an option, and pulls, pushes or promotes
+it. Publishing and promoting ask twice. It also sends the workspace's
+`files/` to the home's vault, a dry run first, grouped under the version
+they document.
+
 The page is in English, German and French:
 pick the language in the header, English by default.
 

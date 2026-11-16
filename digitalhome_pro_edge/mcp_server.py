@@ -48,7 +48,7 @@ server = MCPServer(
 
 web.add_core_tools(server)
 
-from .edge.mcp_tools import act, add_edge_tools  # edge layer
+from .edge.mcp_tools import act, add_edge_tools, confirm_in_panel  # edge layer
 add_edge_tools(server)
 
 
@@ -403,6 +403,87 @@ def restore(workspace: str, revision: int) -> dict:
     a new revision with that content."""
     return act(f"Restore {workspace} to revision {revision}", "POST",
                _ws(workspace) + f"/revisions/{int(revision)}/restore", {})
+
+
+# ---- the home's configurations and vault in the cloud (ADR-0010) ----------
+
+@server.tool()
+def configuration(workspace: str) -> dict:
+    """The home's configurations in the cloud: the live version, every
+    version before it (live, superseded, legacy), the planning options; and
+    what this workspace is linked to (basedOn, option)."""
+    return _get(_ws(workspace) + "/configuration")
+
+
+@server.tool()
+def create_option(workspace: str, label: str, based_on: str = "") -> dict:
+    """A planning option in the cloud for the home, based on a version
+    (default: the live one); this workspace becomes its checkout."""
+    return act(f"Create planning option “{label}” for {workspace}", "POST",
+               _ws(workspace) + "/configuration/option", {"label": label, "based_on": based_on})
+
+
+@server.tool()
+def pull_option(workspace: str, option: str = "") -> dict:
+    """Replace this workspace's design with the option's graph in the cloud
+    (a new revision; the old one stays in the history)."""
+    return act(f"Pull {option or 'the option'} into {workspace}", "POST",
+               _ws(workspace) + "/configuration/pull", {"option": option} if option else {})
+
+
+@server.tool()
+def push_option(workspace: str) -> dict:
+    """Save this workspace's design as its option's next version in the
+    cloud. A conflict means someone saved since: pull first."""
+    return act(f"Push {workspace} to its planning option", "POST", _ws(workspace) + "/configuration/push", {})
+
+
+def _person_only(what: str, method: str, path: str) -> dict:
+    """Publishing a first live configuration and promoting an option cannot
+    be undone: only a person does them. In the chat panel this proposes;
+    elsewhere it points to the page."""
+    if confirm_in_panel():
+        return act(what, method, path, {})
+    return {"status": "not done", "why": f"{what} is a person's act: do it on the page (History → Cloud), "
+            "or propose it in the edge's chat panel."}
+
+
+@server.tool()
+def publish_first_live(workspace: str) -> dict:
+    """Propose that this workspace's design (e.g. the as-is survey) becomes
+    the home's first live configuration, <homeId>-0001-0000."""
+    return _person_only(f"Publish {workspace} as the home's first live configuration", "POST",
+                        _ws(workspace) + "/configuration/publish")
+
+
+@server.tool()
+def promote_option(workspace: str) -> dict:
+    """Propose that this workspace's option becomes the home's live
+    configuration (the next major; the current one becomes legacy). Only
+    when the work is done and delivered."""
+    return _person_only(f"Promote the option of {workspace} to live", "POST", _ws(workspace) + "/configuration/promote")
+
+
+@server.tool()
+def vault(workspace: str, config_version: str = "") -> dict:
+    """The home's vault: photos and documents, each grouped under the
+    configuration version or option it documents."""
+    return _get(_ws(workspace) + "/vault" + (f"?configVersion={_q(config_version)}" if config_version else ""))
+
+
+@server.tool()
+def upload_to_vault(workspace: str, config_version: str = "", names: list[str] | None = None,
+                    dry_run: bool = True) -> dict:
+    """The workspace's files (files/) to the home's vault, each once.
+    dry_run=True (default) says what would go up; then call again with
+    dry_run=False. Photos can show private details: only the home's owners
+    see the vault, but ask before uploading a person's files."""
+    body = {"config_version": config_version, "names": names or [], "dry_run": dry_run}
+    if dry_run:
+        web.ensure_server()
+        return web.call("POST", _ws(workspace) + "/vault/upload", body)
+    return act(f"Upload {len(names) if names else 'the'} files of {workspace} to the home's vault", "POST",
+               _ws(workspace) + "/vault/upload", body)
 
 
 def main() -> int:

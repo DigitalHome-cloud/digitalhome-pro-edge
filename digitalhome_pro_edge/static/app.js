@@ -25,7 +25,8 @@ function hashState() {
 }
 
 async function select(ws, item) {
-  if (ws !== S.ws) Object.assign(S, { cmp: null, cmpFrom: null, cmpTo: null, tagging: "", restoring: "" });
+  if (ws !== S.ws) Object.assign(S, { cmp: null, cmpFrom: null, cmpTo: null, tagging: "", restoring: "",
+                                      conf: null, confSure: "", vaultPlan: null });
   S.ws = ws; S.item = item || null;
   history.replaceState(null, "", ws ? `#w=${encodeURIComponent(ws)}${item ? `&i=${encodeURIComponent(item)}` : ""}` : "#");
   try { await core.api("POST", "/api/selection", { workspace: ws || "", item: item || "" }); } catch (_) { /* fine */ }
@@ -245,6 +246,7 @@ async function drawHistory() {
   const from = S.cmpFrom || (base ? revs.find((r) => r.tags.some((g) => g.name === base)).n : (revs[1] || revs[0] || {}).n);
   const to = S.cmpTo || (revs[0] || {}).n;
   $("#tab-history").innerHTML = `
+    <section class="cloud-conf"></section>
     <p class="sub">${esc(t("h.intro"))}</p>
     <form class="compare">${esc(t("h.compare"))} <select name="from">${opts(from)}</select> → <select name="to">${opts(to)}</select>
       <button type="submit">${esc(t("h.go"))}</button></form>
@@ -261,6 +263,7 @@ async function drawHistory() {
     </tbody></table>`;
   const again = () => { S.seen.history = null; drawHistory(); };
   const path = `/api/workspaces/${encodeURIComponent(S.ws)}`;
+  drawCloud();
   $("#tab-history form.compare").onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target;
@@ -289,6 +292,78 @@ async function drawHistory() {
       catch (err) { core.toast(failed(err)); }
       S.seen = {}; refresh();
     };
+  });
+}
+
+// The home's configurations and vault in the cloud (ADR-0010): fetched when
+// the tab is opened and on Refresh, not on every poll (each is a cloud call).
+async function drawCloud() {
+  const box = $("#tab-history .cloud-conf");
+  if (!box) return;
+  const path = `/api/workspaces/${encodeURIComponent(S.ws)}`;
+  if (!S.conf) {
+    box.innerHTML = `<p class="sub">${esc(t("c.loading"))}</p>`;
+    try { S.conf = await core.api("GET", `${path}/configuration`); } catch (err) { S.conf = { error: failed(err) }; }
+  }
+  const c = S.conf;
+  const again = () => drawCloud();
+  const reload = () => { S.conf = null; S.seen = {}; refresh(); };
+  if (c.error) {
+    box.innerHTML = `<h3>${esc(t("c.title"))}</h3><p class="sub">${esc(c.error)}</p><button class="c-reload">${esc(t("c.reload"))}</button>`;
+    box.querySelector(".c-reload").onclick = reload;
+    return;
+  }
+  const short = (id) => (id || "").replace(c.homeId + "-", "");
+  const link = c.link || {};
+  const sure = (k, label) => `<button class="c-${k}${S.confSure === k ? " sure" : ""}">${esc(t(S.confSure === k ? "c.sure" : label))}</button>`;
+  const plan = S.vaultPlan;
+  box.innerHTML = `<h3>${esc(t("c.title"))}</h3>
+    <p class="sub">${esc(t("c.intro"))}</p>
+    <dl class="c-facts">
+      <dt>${esc(t("c.live"))}</dt><dd>${c.live ? esc(short(c.live)) : esc(t("c.none"))}</dd>
+      <dt>${esc(t("c.based"))}</dt><dd>${link.basedOn ? esc(short(link.basedOn)) : "—"}</dd>
+      <dt>${esc(t("c.option"))}</dt><dd>${link.option ? `${esc(short(link.option))} · v${link.optionVersion}` : "—"}</dd>
+    </dl>
+    ${(c.versions || []).length ? `<ul class="c-versions">${c.versions.map((v) =>
+      `<li class="${esc(v.status)}"><b>${esc(v.version)}</b> <small>${esc(t(`c.st.${v.status}`))} · ${esc(v.summary || "")} · ${esc(when(v.at))}</small></li>`).join("")}</ul>` : ""}
+    ${(c.options || []).length ? `<ul class="c-options">${c.options.map((o) =>
+      `<li><b>${esc(short(o.id))}</b> ${esc(o.label)} <small>${esc(t("c.from", { v: short(o.basedOn) }))} · v${o.version} · ${esc(o.status)}</small></li>`).join("")}</ul>` : ""}
+    <div class="c-acts">
+      ${!c.live ? sure("publish", "c.publish") : ""}
+      ${c.live && !link.option ? `<form class="c-new"><input name="label" maxlength="80" placeholder="${esc(t("c.optPh"))}" required><button type="submit">${esc(t("c.newOpt"))}</button></form>` : ""}
+      ${link.option ? `<button class="c-pull">${esc(t("c.pull"))}</button><button class="c-push">${esc(t("c.push"))}</button>${sure("promote", "c.promote")}` : ""}
+      <button class="c-vault">${esc(t("c.vault"))}</button>
+      <button class="c-reload">${esc(t("c.reload"))}</button>
+    </div>
+    ${plan ? `<div class="c-plan"><p class="sub">${esc(t("c.planIntro", { g: short(plan.group) || "—" }))}</p>
+      <ul>${plan.files.map((f) => `<li>${esc(f.name)} <small>${esc(t(`c.f.${f.status}`))}</small></li>`).join("")}</ul>
+      ${plan.files.some((f) => f.status === "new") && !plan.done ? `<button class="c-upload">${esc(t("c.upload", { n: plan.files.filter((f) => f.status === "new").length }))}</button>` : ""}</div>` : ""}`;
+
+  const call = async (sub, body, ok) => {
+    try { const r = await core.api("POST", `${path}/configuration/${sub}`, body || {}); if (r.status === "conflict") core.toast(r.why); else core.toast(ok(r)); }
+    catch (err) { core.toast(failed(err)); }
+    S.confSure = ""; reload();
+  };
+  const twice = (k, go) => () => { if (S.confSure !== k) { S.confSure = k; return again(); } go(); };
+  const on = (sel, fn) => { const el = box.querySelector(sel); if (el) el.onclick = fn; };
+  on(".c-publish", twice("publish", () => call("publish", {}, (r) => t("c.published", { v: short(r.id) }))));
+  on(".c-promote", twice("promote", () => call("promote", {}, (r) => t("c.promoted", { v: short(r.id) }))));
+  on(".c-pull", () => call("pull", {}, (r) => t("c.pulled", { v: r.version })));
+  on(".c-push", () => call("push", {}, (r) => t("c.pushed", { v: r.version })));
+  on(".c-reload", reload);
+  const form = box.querySelector("form.c-new");
+  if (form) form.onsubmit = (e) => { e.preventDefault(); call("option", { label: form.label.value }, (r) => t("c.created", { v: short(r.id) })); };
+  on(".c-vault", async () => {
+    try { S.vaultPlan = await core.api("POST", `${path}/vault/upload`, { dry_run: true }); } catch (err) { core.toast(failed(err)); }
+    again();
+  });
+  on(".c-upload", async () => {
+    try {
+      const r = await core.api("POST", `${path}/vault/upload`, { dry_run: false, config_version: plan.group });
+      S.vaultPlan = { ...r, done: true };
+      core.toast(t("c.uploaded", { n: r.files.filter((f) => f.status === "ok").length }));
+    } catch (err) { core.toast(failed(err)); }
+    again();
   });
 }
 

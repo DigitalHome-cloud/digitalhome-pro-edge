@@ -27,6 +27,7 @@ from . import homes as hm
 from . import inbox as ib
 from . import labels as lb
 from . import partners as pt
+from . import configs as cf
 from . import revisions as rv
 from . import selection as sel
 from .core import server
@@ -218,6 +219,54 @@ def untag_revision(ws: str, name: str):
 @app.post("/api/workspaces/<ws>/revisions/<ref>/restore")
 def restore_revision(ws: str, ref: str):
     return run(designs().restore, ws, ref)
+
+
+# ---- the home's configurations and vault in the cloud (ADR-0010; darkfactory 0018, 0019)
+
+def configs() -> cf.Configs:
+    return cf.Configs(designs())
+
+
+@app.get("/api/workspaces/<ws>/configuration")
+def configuration(ws: str):
+    return run(configs().status, ws)
+
+
+@app.post("/api/workspaces/<ws>/configuration/publish")
+def configuration_publish(ws: str):
+    # the home's first live configuration: a person's act (the page asks twice)
+    return run(configs().publish_first_live, ws, **fields("revision"))
+
+
+@app.post("/api/workspaces/<ws>/configuration/option")
+def configuration_option(ws: str):
+    return run(configs().create_option, ws, **fields("label", "based_on"))
+
+
+@app.post("/api/workspaces/<ws>/configuration/pull")
+def configuration_pull(ws: str):
+    return run(configs().pull, ws, **fields("option"))
+
+
+@app.post("/api/workspaces/<ws>/configuration/push")
+def configuration_push(ws: str):
+    return run(configs().push, ws)
+
+
+@app.post("/api/workspaces/<ws>/configuration/promote")
+def configuration_promote(ws: str):
+    # the option becomes the home's live configuration: a person's act
+    return run(configs().promote, ws)
+
+
+@app.get("/api/workspaces/<ws>/vault")
+def vault_items(ws: str):
+    return run(configs().vault_items, ws, request.args.get("configVersion", ""))
+
+
+@app.post("/api/workspaces/<ws>/vault/upload")
+def vault_upload(ws: str):
+    return run(configs().vault_upload, ws, **fields("config_version", "names", "dry_run"))
 
 
 @app.get("/workspaces/<ws>/labels")
