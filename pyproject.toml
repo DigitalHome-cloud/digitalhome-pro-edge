@@ -42,7 +42,7 @@ packages = ["digitalhome_pro_edge", "digitalhome_pro_edge.core", "digitalhome_pr
 # skill over without the repository. tests/test_core.py checks this list.
 [tool.setuptools.package-data]
 "digitalhome_pro_edge.edge" = ["static/*", "ontology/*/*.ttl", "ontology/*.ttl", "ontology/*/*.json"]  # edge layer
-digitalhome_pro_edge = ["VERSION", "templates/*.html", "static/*", "skill/*.md", "shared/*.json"]
+digitalhome_pro_edge = ["VERSION", "templates/*.html", "static/*", "static/fonts/*", "skill/*.md", "shared/*.json"]
 "digitalhome_pro_edge.core" = ["static/*", "templates/core/*.html"]
 
 [tool.setuptools.dynamic]

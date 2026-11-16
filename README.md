@@ -9,7 +9,9 @@ points in rooms. Claude proposes every change and you confirm it; the page
 shows the board, a **report** against NF C 15-100, the **materials**, and
 prints **QR labels** for the board. Product data and prices come from each
 **partner** by API or by an imported file (BMEcat, Datanorm, CSV) and stay on
-this computer.
+this computer. Partners can also be sellers of the **digitalhome.cloud
+marketplace**: their catalogues sync both ways, merged statement by statement
+like the Mediathek's A-Boxes; prices never leave (Partners tab; ADR-0006).
 
 It is the DigitalHome.Cloud edge for designers and installers; running a home
 is [digitalhome-devops-edge](https://github.com/DigitalHome-cloud/digitalhome-devops-edge).
@@ -43,6 +45,34 @@ are only accepted from this machine.
 Notes live in two folders: `mydocs/` for your own, which git
 ignores and which follows the working directory, and the samples that ship
 inside the package. A save goes back to the folder the note came from.
+
+Inside `mydocs/`, each workspace has its own folder (ADR-0007):
+`mydocs/<workspace>/design.ttl` and `mydocs/<workspace>/files/`, beside the
+shared `inbox/` and `partners/`. A workspace's id is minted (`ws-…`) and
+names its folder; its name can be changed with **Rename**, and the folder
+stays. A workspace belongs to one home on one linked connection (stage,
+prod …), a home you can access in the Portal (ADR-0008); link the edge
+before starting one.
+
+Every change to a design is kept as a revision in
+`mydocs/<workspace>/revisions/` (ADR-0009). The **History** tab lists them,
+compares any two, tags one, and restores an earlier one as a new revision.
+A *baseline* is a frozen tag, for example the as-is survey of an old board
+before its modernisation: it can never be moved or removed. A survey may leave
+a circuit's rating or cable section unread. The circuit is then marked to
+verify and the report lists it as unchecked, never as compliant.
+
+A home's configurations live in digitalhome.cloud, keyed on the home's
+meaningless id (ADR-0010, from darkfactory ADRs 0018 and 0019). There is one
+live configuration, the versions before it (`<homeId>-MMMM-mmmm`) and
+planning options. In the History tab, **Cloud** publishes a survey as the
+first live configuration, creates an option, and pulls, pushes or promotes
+it. Publishing and promoting ask twice. It also sends the workspace's
+`files/` to the home's vault, a dry run first, grouped under the version
+they document.
+
+The page is in English, German and French:
+pick the language in the header, English by default.
 
 ## Installing without a clone
 

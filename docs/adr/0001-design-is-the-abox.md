@@ -14,6 +14,11 @@ editor is what stands between a person and the design. We move from
 
 ## Decision
 
+In one line: **design = the AI agent chat + the ontologies = the digital home
+model graph(s); everything else is output.** Labels, materials, the report,
+the export and the label sheets are views of the graph, never a second place
+where a design is kept.
+
 1. **A home has workspaces.** The tenant is a home (its SmartHome ID once
    linked); a workspace is an active project in it — a new switchboard, a
    kitchen — and holds one design. A workspace is one A-Box (one space of the
