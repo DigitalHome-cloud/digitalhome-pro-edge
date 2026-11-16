@@ -251,10 +251,13 @@ def cloud_homes(connection: str = "") -> dict:
 
 
 @server.tool()
-def set_workspace(workspace: str, title: str = "", status: str = "") -> dict:
-    """Rename a workspace (its title; the id and folder stay), or set its
-    status: active, quoted, done, archived."""
-    return act(f"Update workspace {workspace}", "POST", _ws(workspace), _clean(title=title, status=status))
+def set_workspace(workspace: str, title: str = "", status: str = "", built_under: str = "") -> dict:
+    """Rename a workspace (its title; the id and folder stay), set its
+    status (active, quoted, done, archived), or record the norm edition the
+    existing installation was built under, e.g. nfc15100-1977 (evidence for
+    the report, not a verdict; only when the date of the work is known)."""
+    return act(f"Update workspace {workspace}", "POST", _ws(workspace),
+               _clean(title=title, status=status, built_under=built_under))
 
 
 @server.tool()
@@ -265,10 +268,10 @@ def add_board(workspace: str, label: str, rows: int = 1, modules_per_row: int = 
 
 
 @server.tool()
-def set_board(workspace: str, board: str, rows: int = 0, modules_per_row: int = 0) -> dict:
-    """Resize a board."""
-    return act(f"Resize board {board}", "POST", _ws(workspace) + f"/boards/{_q(board)}",
-               _clean(rows=rows or None, modules_per_row=modules_per_row or None))
+def set_board(workspace: str, board: str, rows: int = 0, modules_per_row: int = 0, built_under: str = "") -> dict:
+    """Resize a board, or record the norm edition it was built under (e.g. nfc15100-1977)."""
+    return act(f"Update board {board}", "POST", _ws(workspace) + f"/boards/{_q(board)}",
+               _clean(rows=rows or None, modules_per_row=modules_per_row or None, built_under=built_under))
 
 
 @server.tool()
@@ -283,25 +286,40 @@ def add_rcd(workspace: str, board: str, label: str, rated_current: float = 40,
 
 @server.tool()
 def add_device(workspace: str, board: str, kind: str, label: str,
-               rated_current: float = 0, modules: int = 0) -> dict:
+               rated_current: float = 0, modules: int = -1, sensitivity_ma: float = 0,
+               to_verify: bool = False) -> dict:
     """Another board device: contactor (e.g. day/night for the water heater),
-    surge_protector, or breaker (e.g. the 2 A control circuit)."""
+    surge_protector, breaker or fuse (e.g. the 2 A control circuit),
+    main_breaker (the supply's own, e.g. Enedis 500 mA 45 A: give
+    sensitivity_ma; it takes no modules), or unidentified (seen in a survey,
+    not known yet). modules: leave out for the usual width."""
     return act(f"Add {kind.replace('_', ' ')} “{label}”", "POST", _ws(workspace) + "/devices",
                _clean(board=board, kind=kind, label=label, rated_current=rated_current or None,
-                      modules=modules or None))
+                      modules=modules if modules >= 0 else None, sensitivity_ma=sensitivity_ma or None,
+                      to_verify=to_verify or None))
 
 
 @server.tool()
-def add_circuit(workspace: str, rcd: str, label: str, circuit_type: str, rated_current: float,
-                cross_section: float, points: int = 0, appliance: str = "") -> dict:
-    """A circuit and its own breaker below an RCD. circuit_type: lighting,
-    socket, cooking, water_heater, heating, floor_heating, ev_charger,
-    dedicated (then say the appliance: washing_machine, dishwasher, dryer,
-    oven, heat_pump …). Rating in A, section in mm², points if known."""
-    return act(f"Add circuit “{label}” {rated_current:g} A {cross_section:g} mm²", "POST",
-               _ws(workspace) + "/circuits",
-               _clean(rcd=rcd, label=label, circuit_type=circuit_type, rated_current=rated_current,
-                      cross_section=cross_section, points=points or None, appliance=appliance))
+def add_circuit(workspace: str, label: str, rcd: str = "", circuit_type: str = "",
+                rated_current: float = 0, cross_section: float = 0, points: int = 0, appliance: str = "",
+                board: str = "", protection: str = "breaker", to_verify: bool = False) -> dict:
+    """A circuit and its own breaker (or fuse) below an RCD. circuit_type:
+    lighting, socket, cooking, water_heater, heating, floor_heating,
+    ev_charger, dedicated (then say the appliance: washing_machine,
+    dishwasher, dryer, oven, heat_pump …). Rating in A, section in mm²,
+    points if known.
+
+    Surveying an existing (old) board: give `board` instead of `rcd` when the
+    circuit is below no RCD, protection="fuse" for a fuse holder, and leave
+    out what was not read (type, rating, section): the circuit is then marked
+    to verify. Never guess a value."""
+    what = " ".join(x for x in (f"{rated_current:g} A" if rated_current else "",
+                                f"{cross_section:g} mm²" if cross_section else "") if x) or "to verify"
+    return act(f"Add circuit “{label}” {what}", "POST", _ws(workspace) + "/circuits",
+               _clean(rcd=rcd, board=board, label=label, circuit_type=circuit_type,
+                      rated_current=rated_current or None, cross_section=cross_section or None,
+                      points=points or None, appliance=appliance,
+                      protection=protection if protection != "breaker" else None, to_verify=to_verify or None))
 
 
 @server.tool()
@@ -350,6 +368,41 @@ def remove(workspace: str, item: str) -> dict:
     """Remove an item. A circuit takes its breaker and points with it; an RCD
     or a board is refused while something still hangs on it."""
     return act(f"Remove {item}", "DELETE", _ws(workspace) + f"/items/{_q(item)}", {})
+
+
+# ------------------------------------------------------------- history ----
+# Every saved state of a design is a numbered revision (ADR-0009).
+
+@server.tool()
+def revisions(workspace: str) -> list:
+    """Every saved state of the design, newest first: number, when, who,
+    through what (page, chat, mcp), a one-line summary, and its tags. A
+    frozen tag is a baseline (e.g. the as-is installation)."""
+    return _get(_ws(workspace) + "/revisions")
+
+
+@server.tool()
+def diff(workspace: str, from_revision: str, to_revision: str = "latest") -> dict:
+    """What changed between two revisions (numbers or tag names, e.g. the
+    baseline "As-is 1986" and "latest"): nodes added, removed, and changed
+    with each property's values before and after."""
+    return _get(_ws(workspace) + "/diff?" + urllib.parse.urlencode({"from": from_revision, "to": to_revision}))
+
+
+@server.tool()
+def tag_revision(workspace: str, revision: int, name: str, frozen: bool = False) -> dict:
+    """Name a revision. frozen=True makes it a baseline that never moves —
+    only for the installation as surveyed, or as delivered."""
+    return act(f"Tag revision {revision} of {workspace} \"{name}\"" + (" (baseline)" if frozen else ""), "POST",
+               _ws(workspace) + f"/revisions/{int(revision)}/tag", {"name": name, "frozen": bool(frozen)})
+
+
+@server.tool()
+def restore(workspace: str, revision: int) -> dict:
+    """Make the design what it was at a revision. History is kept: this adds
+    a new revision with that content."""
+    return act(f"Restore {workspace} to revision {revision}", "POST",
+               _ws(workspace) + f"/revisions/{int(revision)}/restore", {})
 
 
 def main() -> int:

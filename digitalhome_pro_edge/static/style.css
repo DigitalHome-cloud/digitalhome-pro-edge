@@ -123,6 +123,7 @@ small.instance { font: 500 9.5px var(--mono); text-transform: uppercase; letter-
 .meter.full > i { background: var(--danger); } .meter.tight > i { background: var(--warn); }
 .rcd { border-left: 3px solid var(--accent); padding: 4px 0 4px 10px; margin: 8px 0; }
 .rcd > b { font-size: 13px; }
+.rcd.no-rcd { border-left-color: var(--warn); }
 .circuits { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .circuits li, .devices li { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 3px 6px; border-radius: 4px; cursor: pointer; }
 .circuits li:hover, .devices li:hover, li.is-on { background: var(--panel-2); }
@@ -133,6 +134,7 @@ small.instance { font: 500 9.5px var(--mono); text-transform: uppercase; letter-
 
 .finding { border-left: 3px solid var(--danger); padding: 6px 10px; margin: 6px 0; background: var(--panel); border-radius: 4px; }
 .finding.warning { border-color: var(--warn); }
+.finding.unchecked { border-color: var(--muted); border-left-style: dashed; }
 .finding b { display: block; font-size: 12px; color: var(--muted); }
 .ok { border-left: 3px solid var(--accent); padding: 8px 10px; }
 
@@ -172,3 +174,16 @@ table.files th, table.bom th { font: 500 10px var(--mono); text-transform: upper
 .ws-rename { font-size: 12px; padding: 2px 8px; }
 .ws-rename-form input { font: inherit; font-size: 1.2em; min-width: 16em; }
 
+
+/* history (ADR-0009) */
+.compare { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 12px; }
+.diff { background: var(--panel); border-radius: 4px; padding: 8px 12px; margin-bottom: 14px; }
+.diff .add { color: var(--ok, inherit); } .diff .del { color: var(--danger); }
+.diff ul { margin: 2px 0 6px 18px; padding: 0; font-size: 12px; }
+table.history { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.history td, table.history th { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); vertical-align: top; }
+table.history td.acts { white-space: nowrap; text-align: right; }
+.tag { display: inline-block; font: 500 10.5px var(--mono); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--muted); margin-left: 4px; }
+.tag.frozen { border-color: var(--warn); }
+.tagging { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+button.restore.sure { border-color: var(--danger); color: var(--danger); }

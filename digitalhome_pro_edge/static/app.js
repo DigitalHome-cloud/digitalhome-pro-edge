@@ -25,6 +25,7 @@ function hashState() {
 }
 
 async function select(ws, item) {
+  if (ws !== S.ws) Object.assign(S, { cmp: null, cmpFrom: null, cmpTo: null, tagging: "", restoring: "" });
   S.ws = ws; S.item = item || null;
   history.replaceState(null, "", ws ? `#w=${encodeURIComponent(ws)}${item ? `&i=${encodeURIComponent(item)}` : ""}` : "#");
   try { await core.api("POST", "/api/selection", { workspace: ws || "", item: item || "" }); } catch (_) { /* fine */ }
@@ -96,8 +97,11 @@ function homeOptions() {
 // --------------------------------------------------------- the design ----
 
 function circuitLine(c) {
-  const what = [c.type.replace("_", " "), `${c.rated_current} A`, `${c.cross_section} mm²`,
-                c.points ? t("circuit.pts", { n: c.points }) : "", c.appliance.replace("_", " ")].filter(Boolean).join(" · ");
+  // a surveyed circuit may not know its values yet: "?" rather than a guess
+  const what = [c.type ? c.type.replace("_", " ") : "?", `${c.rated_current ?? "?"} A`, `${c.cross_section ?? "?"} mm²`,
+                c.protection === "fuse" ? t("circuit.fuse") : "",
+                c.points ? t("circuit.pts", { n: c.points }) : "", c.appliance.replace("_", " "),
+                c.to_verify ? "⚠ " + t("circuit.verify") : ""].filter(Boolean).join(" · ");
   const ref = c.breakers.map((b) => b.reference).filter(Boolean).join(", ");
   return `<li data-item="${esc(c.id)}" class="${c.id === S.item ? "is-on" : ""}">
             <span>${esc(c.label)}</span><small>${esc(what)}${ref ? " · " + esc(ref) : ""}</small></li>`;
@@ -113,9 +117,13 @@ function boardBlock(b) {
     ${b.rcds.map((r) => `<div class="rcd"><b>${esc(r.label)}</b>
         <small> ${esc(t("board.rcd", { a: r.rated_current, ma: r.sensitivity_ma, type: r.rcd_type, n: r.circuits.length }))}</small>
         <ul class="circuits">${r.circuits.map(circuitLine).join("")}</ul></div>`).join("")}
+    ${(b.circuits || []).length ? `<div class="rcd no-rcd"><b>${esc(t("board.norcd"))}</b>
+        <ul class="circuits">${b.circuits.map(circuitLine).join("")}</ul></div>` : ""}
     ${b.devices.length ? `<ul class="devices">${b.devices.map((d) =>
       `<li data-item="${esc(d.id)}"><span>${esc(d.label)}</span><small>${esc(d.kind.replace("_", " "))}${
-        d.rated_current != null ? " · " + d.rated_current + " A" : ""} · ${esc(t("board.mod", { n: d.modules }))}</small></li>`).join("")}</ul>` : ""}
+        d.rated_current != null ? " · " + d.rated_current + " A" : ""}${
+        d.sensitivity_ma != null ? " · " + d.sensitivity_ma + " mA" : ""} · ${esc(t("board.mod", { n: d.modules }))}${
+        d.to_verify ? " · ⚠ " + esc(t("circuit.verify")) : ""}</small></li>`).join("")}</ul>` : ""}
   </article>`;
 }
 
@@ -205,6 +213,83 @@ async function drawBom() {
     </tbody><tfoot><tr><th colspan="4">${esc(t("bom.priced"))}${b.complete ? "" : esc(t("bom.incomplete"))}</th>
       <th class="num">${esc(b.total)}</th></tr></tfoot></table>
     <p class="note">${esc(t("bom.note"))}</p>`;
+}
+
+// ----------------------------------------------------------- history ----
+// Every saved state of the design (ADR-0009): compare two, name one, make a
+// baseline (a frozen name: the as-is installation), restore one as a new revision.
+
+function drawDiff(d) {
+  if (!d) return "";
+  const vals = (v) => v.length ? v.map(esc).join(", ") : "—";
+  const node = (x) => `${esc(kind(x.type.toLowerCase()) || x.type)} <b>${esc(x.label || x.id)}</b>`;
+  const none = !d.added.length && !d.removed.length && !d.changed.length;
+  return `<div class="diff"><p class="sub">${esc(t("h.between", { a: d.from, b: d.to }))}</p>
+    ${none ? `<p class="ok">${esc(t("h.same"))}</p>` : ""}
+    ${d.added.map((x) => `<div class="add">+ ${node(x)}</div>`).join("")}
+    ${d.removed.map((x) => `<div class="del">− ${node(x)}</div>`).join("")}
+    ${d.changed.map((x) => `<div class="chg">~ ${node(x)}<ul>${x.changes.map((c) =>
+      `<li><code>${esc(c.property)}</code> ${vals(c.before)} → ${vals(c.after)}</li>`).join("")}</ul></div>`).join("")}</div>`;
+}
+
+async function drawHistory() {
+  const revs = await core.api("GET", `/api/workspaces/${encodeURIComponent(S.ws)}/revisions`);
+  const key = JSON.stringify(revs) + JSON.stringify(S.cmp || null) + (S.tagging || "") + (S.restoring || "");
+  if (S.seen.history === key) return;
+  S.seen.history = key;
+  const base = revs.flatMap((r) => r.tags.filter((g) => g.frozen).map((g) => g.name))[0];
+  const opts = (sel) => revs.map((r) => {
+    const name = r.tags.length ? ` · ${r.tags.map((g) => g.name).join(", ")}` : "";
+    return `<option value="${r.n}" ${String(r.n) === String(sel) ? "selected" : ""}>r${r.n}${esc(name)}</option>`;
+  }).join("");
+  const from = S.cmpFrom || (base ? revs.find((r) => r.tags.some((g) => g.name === base)).n : (revs[1] || revs[0] || {}).n);
+  const to = S.cmpTo || (revs[0] || {}).n;
+  $("#tab-history").innerHTML = `
+    <p class="sub">${esc(t("h.intro"))}</p>
+    <form class="compare">${esc(t("h.compare"))} <select name="from">${opts(from)}</select> → <select name="to">${opts(to)}</select>
+      <button type="submit">${esc(t("h.go"))}</button></form>
+    ${drawDiff(S.cmp)}
+    <table class="history"><thead><tr><th>#</th><th>${esc(t("h.when"))}</th><th>${esc(t("h.via"))}</th>
+      <th>${esc(t("h.what"))}</th><th></th></tr></thead><tbody>
+    ${revs.map((r, i) => `<tr data-n="${r.n}"><td>r${r.n}</td><td>${esc(when(r.at))}</td>
+      <td>${esc(t(`h.via.${r.via}`))}<br><small>${esc(r.by)}</small></td>
+      <td>${esc(r.summary)}${r.tags.map((g) => ` <span class="tag${g.frozen ? " frozen" : ""}" title="${esc(g.frozen ? t("h.frozen") : "")}">${g.frozen ? "🔒 " : ""}${esc(g.name)}</span>`).join("")}
+        ${S.tagging === String(r.n) ? `<form class="tagging"><input name="name" maxlength="80" placeholder="${esc(t("h.tagPh"))}" required>
+          <label><input type="checkbox" name="frozen"> ${esc(t("h.baseline"))}</label><button type="submit">${esc(t("h.save"))}</button></form>` : ""}</td>
+      <td class="acts"><button class="tag-it">${esc(t("h.tag"))}</button>
+        ${i > 0 ? `<button class="restore${S.restoring === String(r.n) ? " sure" : ""}">${esc(t(S.restoring === String(r.n) ? "h.sure" : "h.restore"))}</button>` : ""}</td></tr>`).join("")}
+    </tbody></table>`;
+  const again = () => { S.seen.history = null; drawHistory(); };
+  const path = `/api/workspaces/${encodeURIComponent(S.ws)}`;
+  $("#tab-history form.compare").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    S.cmpFrom = f.from.value; S.cmpTo = f.to.value;
+    try { S.cmp = await core.api("GET", `${path}/diff?from=${f.from.value}&to=${f.to.value}`); } catch (err) { core.toast(failed(err)); }
+    again();
+  };
+  document.querySelectorAll("#tab-history tr[data-n]").forEach((tr) => {
+    const n = tr.dataset.n;
+    tr.querySelector(".tag-it").onclick = () => { S.tagging = S.tagging === n ? "" : n; S.restoring = ""; again(); };
+    const form = tr.querySelector("form.tagging");
+    if (form) {
+      form.name.focus();
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        try { await core.api("POST", `${path}/revisions/${n}/tag`, { name: form.name.value, frozen: form.frozen.checked }); S.tagging = ""; }
+        catch (err) { core.toast(failed(err)); }
+        again();
+      };
+    }
+    const back = tr.querySelector(".restore");
+    if (back) back.onclick = async () => {
+      if (S.restoring !== n) { S.restoring = n; S.tagging = ""; return again(); }
+      S.restoring = "";
+      try { const r = await core.api("POST", `${path}/revisions/${n}/restore`); core.toast(t("h.restored", { n, m: r.revision })); }
+      catch (err) { core.toast(failed(err)); }
+      S.seen = {}; refresh();
+    };
+  });
 }
 
 // ---------------------------------------------------------- partners ----
@@ -500,6 +585,7 @@ async function refresh() {
     if (S.tab === "design") await drawDesign();
     if (S.tab === "report") await drawReport();
     if (S.tab === "bom") await drawBom();
+    if (S.tab === "history") await drawHistory();
   } catch (err) {
     if (err && err.status === 404 && S.ws) select(null);
   }

@@ -38,6 +38,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import XSD
 
+from . import revisions as rv
 from .edge import knowledge as kn
 from .edge import settings
 
@@ -65,9 +66,16 @@ TYPE_A_CIRCUITS = {"cooking", "ev_charger"}
 # devices that sit on a board, with the modules (18 mm) they usually take
 DEVICES = {
     "breaker": (DHC.ProtectionDevice, 1),
+    "fuse": (DHC.ProtectionDevice, 1),            # a fuse holder, in an older board
     "contactor": (DHC.Contactor, 1),
     "surge_protector": (DHC.SurgeProtector, 2),
+    # the supply's main breaker (France: the Enedis AGCP, e.g. 500 mA): upstream
+    # of the board, sealed, not the electrician's; it takes no board modules
+    "main_breaker": (DHC.ProtectionDevice, 0),
+    "unidentified": (DHP.UnidentifiedDevice, 2),  # seen in a survey, not yet known
 }
+PROTECTION_KINDS = ("breaker", "fuse", "main_breaker")
+EDITION = re.compile(r"([a-z][a-z0-9]{1,19})-([0-9]{4})")
 RCD_MODULES = 2
 POINT_KINDS = {"socket", "light", "switch", "appliance", "outlet"}
 STATUSES = ("active", "quoted", "done", "archived")
@@ -112,7 +120,12 @@ class WorkspaceKB(kn.KnowledgeBase):
         self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         folder.mkdir(exist_ok=True, mode=0o700)
         os.chmod(folder, 0o700)
+        before = self.load(name) if self._path(name).exists() else None
         super()._save(name, g)
+        rv.History(folder).record(before, g)        # ADR-0009: every saved state is kept
+
+    def history(self, name: str) -> "rv.History":
+        return rv.History(self.folder(name))
 
 
 def migrate_layout(root: Optional[Path] = None) -> List[str]:
@@ -184,7 +197,25 @@ def _local(iri: URIRef) -> str:
 
 
 def _dec(x: Any) -> Literal:
-    return Literal(Decimal(str(x)), datatype=XSD.decimal)
+    return Literal(_short_decimal(Decimal(str(x))), datatype=XSD.decimal)
+
+
+def _short_decimal(d: Decimal) -> str:
+    return format(d.normalize(), "f") if d == d else str(d)
+
+
+def _for_shapes(o: Any) -> Any:
+    """A decimal in its shortest form (32.0 → "32") for the norm shapes. Their
+    guards use sh:hasValue "32"^^xsd:decimal, which compares RDF TERMS; rdflib
+    writes the decimal 32 to Turtle as 32.0 and reads it back as "32.0", so
+    without this the IRVE 32 A rules never ran on a saved design (core
+    CLAUDE.md, the guard-literal trap)."""
+    if isinstance(o, Literal) and o.datatype == XSD.decimal:
+        try:
+            return Literal(_short_decimal(Decimal(str(o))), datatype=XSD.decimal)
+        except Exception:
+            return o
+    return o
 
 
 def _int(x: Any) -> Literal:
@@ -300,9 +331,23 @@ class Designs:
         self._change(ws, apply)
         return {"workspace": ws, "home": home, "instance": instance}
 
-    def set_workspace(self, ws: str, title: Optional[str] = None, status: Optional[str] = None) -> Dict:
+    def _edition(self, edition: str) -> URIRef:
+        """nfc15100-1977 → dhc:NormEdition_NFC15100_1977, if the T-Box has it."""
+        m = EDITION.fullmatch(str(edition or ""))
+        if not m:
+            raise ValueError("an edition looks like nfc15100-2015")
+        iri = DHC[f"NormEdition_{m.group(1).upper()}_{m.group(2)}"]
+        if (iri, RDF.type, DHC.NormEdition) not in _norm_graphs()[1]:
+            raise ValueError(f"the T-Box has no edition {edition}")
+        return iri
+
+    def set_workspace(self, ws: str, title: Optional[str] = None, status: Optional[str] = None,
+                      built_under: Optional[str] = None) -> Dict:
+        """Rename a workspace, set its status, or record the norm edition its
+        installation was built under (dhc:builtUnder: evidence, not a verdict)."""
         if status is not None and status not in STATUSES:
             raise ValueError(f"status is one of {', '.join(STATUSES)}")
+        edition = self._edition(built_under) if built_under else None
 
         def apply(g: Graph) -> None:
             node = self._workspace_node(g)
@@ -312,6 +357,8 @@ class Designs:
                 g.set((node, RDFS.label, Literal(title.strip())))
             if status:
                 g.set((node, DHP.status, Literal(status)))
+            if edition is not None:
+                g.set((node, DHC.builtUnder, edition))
         self._change(ws, apply)
         return {"workspace": ws}
 
@@ -341,9 +388,13 @@ class Designs:
         return {"id": ident}
 
     def set_board(self, ws: str, board: str, rows: Optional[int] = None,
-                  modules_per_row: Optional[int] = None) -> Dict:
+                  modules_per_row: Optional[int] = None, built_under: Optional[str] = None) -> Dict:
+        edition = self._edition(built_under) if built_under else None
+
         def apply(g: Graph) -> None:
             n = self._find(g, board, DHC.DistributionBoard)
+            if edition is not None:
+                g.set((n, DHC.builtUnder, edition))
             if rows is not None:
                 g.set((n, DHP.rows, _int(rows)))
             if modules_per_row is not None:
@@ -369,13 +420,16 @@ class Designs:
         return {"id": ident}
 
     def add_device(self, ws: str, board: str, kind: str, label: str,
-                   rated_current: Optional[float] = None, modules: Optional[int] = None) -> Dict:
+                   rated_current: Optional[float] = None, modules: Optional[int] = None,
+                   sensitivity_ma: Optional[float] = None, to_verify: bool = False) -> Dict:
         """A board device that is not a circuit's own breaker: a contactor, a
-        surge protector, the breaker of a control circuit."""
+        surge protector, the breaker or fuse of a control circuit, the supply's
+        main breaker (with its sensitivity), or a device a survey could not
+        identify."""
         if kind not in DEVICES:
             raise ValueError(f"kind is one of {', '.join(DEVICES)}")
         cls, default_modules = DEVICES[kind]
-        ident = _mint(kind.split("_")[0])
+        ident = _mint({"main_breaker": "main", "unidentified": "unknown"}.get(kind, kind.split("_")[0]))
 
         def apply(g: Graph) -> None:
             b = self._find(g, board, DHC.DistributionBoard)
@@ -383,46 +437,74 @@ class Designs:
             g.add((n, RDF.type, cls))
             g.add((n, RDFS.label, Literal(label)))
             g.add((n, DHP.onBoard, b))
-            g.add((n, DHP.modules, _int(modules or default_modules)))
+            g.add((n, DHP.modules, _int(modules if modules is not None else default_modules)))
+            if kind in PROTECTION_KINDS:
+                g.add((n, DHP.protectionKind, Literal(kind)))
             if rated_current is not None:
                 g.add((n, DHC.ratedCurrent, _dec(rated_current)))
+            if sensitivity_ma is not None:
+                g.add((n, DHC.sensitivityMA, _dec(sensitivity_ma)))
+            if to_verify or kind == "unidentified":
+                g.add((n, DHP.toVerify, Literal(True)))
         self._change(ws, apply)
         return {"id": ident}
 
-    def add_circuit(self, ws: str, rcd: str, label: str, circuit_type: str, rated_current: float,
-                    cross_section: float, points: int = 0, appliance: str = "",
-                    dedicated: Optional[bool] = None) -> Dict:
-        """A circuit and its own breaker (1 module), below an RCD."""
-        if circuit_type not in CIRCUIT_TYPES:
+    def add_circuit(self, ws: str, rcd: Optional[str] = None, label: str = "",
+                    circuit_type: Optional[str] = None, rated_current: Optional[float] = None,
+                    cross_section: Optional[float] = None, points: int = 0, appliance: str = "",
+                    dedicated: Optional[bool] = None, board: Optional[str] = None,
+                    protection: str = "breaker", to_verify: bool = False) -> Dict:
+        """A circuit and its own breaker or fuse (1 module), below an RCD, or
+        straight on a board that has none (an as-is survey of an old board).
+        A survey may leave the type, rating and cross-section unknown: the
+        circuit is then marked to verify, never given a guessed value."""
+        if circuit_type and circuit_type not in CIRCUIT_TYPES:
             raise ValueError(f"circuit_type is one of {', '.join(CIRCUIT_TYPES)}")
+        if protection not in ("breaker", "fuse"):
+            raise ValueError("protection is breaker or fuse")
+        if not (label or "").strip():
+            raise ValueError("a circuit has a label")
+        if not rcd and not board:
+            raise ValueError("name the RCD the circuit is below, or the board for one without an RCD")
+        unknown = not circuit_type or rated_current is None or cross_section is None
+        to_verify = bool(to_verify or unknown)
         ident = _mint("circuit")
 
         def apply(g: Graph) -> None:
-            r = self._find(g, rcd, DHC.RCD)
+            r = self._find(g, rcd, DHC.RCD) if rcd else None
             home = self._home(g)
-            board = g.value(r, DHP.onBoard)
+            b = g.value(r, DHP.onBoard) if r is not None else self._find(g, board, DHC.DistributionBoard)
             c = _iri(home, "circuit", ident)
-            brk = _iri(home, "breaker", ident.replace("circuit", "brk"))
+            brk = _iri(home, protection, ident.replace("circuit", "brk" if protection == "breaker" else "fuse"))
+            rating = f"{rated_current:g} A" if rated_current is not None else "? A"
             g.add((brk, RDF.type, DHC.ProtectionDevice))
-            g.add((brk, RDFS.label, Literal(f"{label} — {rated_current:g} A")))
-            g.add((brk, DHC.ratedCurrent, _dec(rated_current)))
-            g.add((brk, DHP.onBoard, board))
+            g.add((brk, RDFS.label, Literal(f"{label} — fuse {rating}" if protection == "fuse" else f"{label} — {rating}")))
+            g.add((brk, DHP.protectionKind, Literal(protection)))
+            if rated_current is not None:
+                g.add((brk, DHC.ratedCurrent, _dec(rated_current)))
+            g.add((brk, DHP.onBoard, b))
             g.add((brk, DHP.modules, _int(1)))
             g.add((c, RDF.type, DHC.Circuit))
             g.add((c, RDFS.label, Literal(label)))
-            g.add((c, DHC.hasCircuitType, DHC[CIRCUIT_TYPES[circuit_type]]))
+            if circuit_type:
+                g.add((c, DHC.hasCircuitType, DHC[CIRCUIT_TYPES[circuit_type]]))
             g.add((c, DHC.governedBy, DHC.Norm_NFC15100))
-            g.add((c, DHC.ratedCurrent, _dec(rated_current)))
-            g.add((c, DHC.crossSection, _dec(cross_section)))
+            if rated_current is not None:
+                g.add((c, DHC.ratedCurrent, _dec(rated_current)))
+            if cross_section is not None:
+                g.add((c, DHC.crossSection, _dec(cross_section)))
+            if to_verify:
+                g.add((c, DHP.toVerify, Literal(True)))
             g.add((c, DHC.phase, _int(1)))
             g.add((c, DHC.dedicated, Literal(bool(dedicated) if dedicated is not None
-                                             else circuit_type not in ("lighting", "socket"))))
+                                             else bool(circuit_type) and circuit_type not in ("lighting", "socket"))))
             if points:
                 g.add((c, DHC.maxPoints, _int(points)))
             if appliance:
                 g.add((c, DHP.appliance, Literal(appliance)))
             g.add((c, DHC.hasProtection, brk))
-            g.add((c, DHC.hasProtection, r))
+            if r is not None:
+                g.add((c, DHC.hasProtection, r))
         self._change(ws, apply)
         return {"id": ident}
 
@@ -526,6 +608,70 @@ class Designs:
         self._change(ws, apply)
         return {"removed": removed}
 
+    # ------------------------------------------------------------ history (ADR-0009)
+
+    def _history(self, ws: str) -> "rv.History":
+        if ws not in self.kb.graphs() or self._workspace_node(self.kb.load(ws)) is None:
+            raise NotFound(f"no workspace {ws}")
+        h = rv.History(self.kb.folder(ws)) if hasattr(self.kb, "folder") else None
+        if h is None:
+            raise NotFound("this knowledge base keeps no history")
+        if h.latest() == 0:                         # a design saved before history was kept
+            h.record(None, self.kb.load(ws))
+        return h
+
+    def revisions(self, ws: str) -> List[Dict]:
+        """Every saved state, newest first, with its tags."""
+        return self._history(ws).list()
+
+    def revision(self, ws: str, ref: str) -> str:
+        """One revision (a number, a tag, or latest) as Turtle."""
+        try:
+            return self._history(ws).text(ref)
+        except rv.RevisionError as exc:
+            raise NotFound(str(exc)) from None
+
+    def diff(self, ws: str, a: str, b: str = "latest") -> Dict:
+        """What changed from revision a to revision b (numbers or tags), node by node."""
+        h = self._history(ws)
+        try:
+            na, nb = h.resolve(a), h.resolve(b)
+        except rv.RevisionError as exc:
+            raise NotFound(str(exc)) from None
+        return {"from": na, "to": nb, **rv.compare(h.graph(na), h.graph(nb))}
+
+    def tag_revision(self, ws: str, revision: str, name: str, frozen: bool = False) -> Dict:
+        """Name a revision; a frozen name is a baseline and never moves."""
+        try:
+            return self._history(ws).tag(revision, name, frozen)
+        except rv.RevisionError as exc:
+            raise ValueError(str(exc)) from None
+
+    def untag_revision(self, ws: str, name: str) -> Dict:
+        try:
+            self._history(ws).untag(name)
+        except rv.RevisionError as exc:
+            raise ValueError(str(exc)) from None
+        return {"untagged": name}
+
+    def restore(self, ws: str, revision: str) -> Dict:
+        """Make the design what it was at `revision`, as a NEW revision:
+        history is never rewritten."""
+        h = self._history(ws)
+        try:
+            n = h.resolve(revision)
+        except rv.RevisionError as exc:
+            raise NotFound(str(exc)) from None
+        old = h.graph(n)
+
+        def apply(g: Graph) -> None:
+            g.remove((None, None, None))
+            for t in old:
+                g.add(t)
+        with rv.noting(f"restored r{n}"):
+            self._change(ws, apply)
+        return {"restored": n, "revision": h.latest()}
+
     # ------------------------------------------------------------ reading
 
     def _breakers(self, g: Graph, circuit: URIRef) -> List[URIRef]:
@@ -543,6 +689,12 @@ class Designs:
         t = g.value(circuit, DHC.hasCircuitType)
         back = {v: k for k, v in CIRCUIT_TYPES.items()}
         return back.get(_local(t).split("#")[-1] if t else "", "") or str(t).rsplit("#", 1)[-1]
+
+    def _device_kind(self, g: Graph, d: URIRef) -> str:
+        kind = g.value(d, DHP.protectionKind)
+        if kind is not None:
+            return str(kind)
+        return next((k for k, (cls, _) in DEVICES.items() if (d, RDF.type, cls) in g), "device")
 
     def _num(self, g: Graph, n: URIRef, p: URIRef) -> Optional[float]:
         v = g.value(n, p)
@@ -570,18 +722,26 @@ class Designs:
         for b in sorted(set(g.subjects(RDF.type, DHC.DistributionBoard)), key=str):
             on = set(g.subjects(DHP.onBoard, b))
             rcds = []
+            def circuit(c: URIRef) -> Dict:
+                own = self._breakers(g, c)
+                return {**item(c),
+                        "type": self._type_key(g, c) if g.value(c, DHC.hasCircuitType) is not None else "",
+                        "rated_current": self._num(g, c, DHC.ratedCurrent),
+                        "cross_section": self._num(g, c, DHC.crossSection),
+                        "points": int(g.value(c, DHC.maxPoints) or 0),
+                        "appliance": str(g.value(c, DHP.appliance) or ""),
+                        "to_verify": (c, DHP.toVerify, Literal(True)) in g,
+                        "protection": self._device_kind(g, own[0]) if own else "",
+                        "breakers": [item(x) for x in own],
+                        "point_list": [{**item(p), "kind": str(g.value(p, DHP.kind))}
+                                       for p in sorted(g.subjects(DHP.onCircuit, c), key=str)]}
+
+            by_label = lambda c: str(g.value(c, RDFS.label))  # noqa: E731
+            # circuits on this board below no RCD (a survey of an old board): their own fuse or breaker is here
+            loose = sorted({c for x in on for c in g.subjects(DHC.hasProtection, x)
+                            if (c, RDF.type, DHC.Circuit) in g and self._rcd(g, c) is None}, key=by_label)
             for r in sorted((x for x in on if (x, RDF.type, DHC.RCD) in g), key=str):
-                circuits = []
-                for c in sorted(set(g.subjects(DHC.hasProtection, r)), key=lambda c: str(g.value(c, RDFS.label))):
-                    circuits.append({**item(c),
-                                     "type": self._type_key(g, c),
-                                     "rated_current": self._num(g, c, DHC.ratedCurrent),
-                                     "cross_section": self._num(g, c, DHC.crossSection),
-                                     "points": int(g.value(c, DHC.maxPoints) or 0),
-                                     "appliance": str(g.value(c, DHP.appliance) or ""),
-                                     "breakers": [item(x) for x in self._breakers(g, c)],
-                                     "point_list": [{**item(p), "kind": str(g.value(p, DHP.kind))}
-                                                    for p in sorted(g.subjects(DHP.onCircuit, c), key=str)]})
+                circuits = [circuit(c) for c in sorted(set(g.subjects(DHC.hasProtection, r)), key=by_label)]
                 rcds.append({**item(r), "rated_current": self._num(g, r, DHC.ratedCurrent),
                              "sensitivity_ma": self._num(g, r, DHC.sensitivityMA),
                              "rcd_type": str(g.value(r, DHC.rcdType)), "circuits": circuits})
@@ -589,21 +749,25 @@ class Designs:
             for d in sorted(on, key=str):
                 if (d, RDF.type, DHC.RCD) in g:
                     continue
-                kind = next((k for k, (cls, _) in DEVICES.items() if (d, RDF.type, cls) in g), "device")
+                kind = self._device_kind(g, d)
                 own = any((c, DHC.hasProtection, d) in g for c in g.subjects(RDF.type, DHC.Circuit))
                 if not own:
                     devices.append({**item(d), "kind": kind, "rated_current": self._num(g, d, DHC.ratedCurrent),
-                                    "modules": int(g.value(d, DHP.modules) or 1)})
+                                    "sensitivity_ma": self._num(g, d, DHC.sensitivityMA),
+                                    "to_verify": (d, DHP.toVerify, Literal(True)) in g,
+                                    "modules": int(g.value(d, DHP.modules) or 0)})
             boards.append({**item(b), "rows": int(g.value(b, DHP.rows)),
                            "modules_per_row": int(g.value(b, DHP.modulesPerRow)),
                            "modules_used": sum(int(g.value(x, DHP.modules) or 0) for x in on),
-                           "rcds": rcds, "devices": devices})
+                           "built_under": str(g.value(b, DHC.builtUnder) or "").rsplit("#", 1)[-1],
+                           "rcds": rcds, "circuits": [circuit(c) for c in loose], "devices": devices})
         rooms = [{**item(r), "level": str(g.value(r, DHP.level) or ""),
                   "items": sorted(_local(x) for x in g.subjects(REC.locatedIn, r))}
                  for r in sorted(set(g.subjects(RDF.type, REC.Room)), key=lambda r: str(g.value(r, RDFS.label)))]
         return {"workspace": ws, "title": str(g.value(node, RDFS.label)), "home": str(g.value(node, DHP.home)),
                 "instance": str(g.value(node, DHP.instance) or ""),
                 "status": str(g.value(node, DHP.status)), "country": str(g.value(node, DHP.country) or ""),
+                "built_under": str(g.value(node, DHC.builtUnder) or "").rsplit("#", 1)[-1],
                 "boards": boards, "rooms": rooms}
 
     def export(self, ws: str) -> str:
@@ -624,7 +788,7 @@ class Designs:
         if self._workspace_node(g) is None:
             raise NotFound(f"no workspace {ws}")
         findings = self._norm_findings(g, lang) + self._board_findings(g, lang) + self._article_findings(g, lang)
-        return {"workspace": ws, "conforms": not any(f["severity"] == "violation" for f in findings),
+        return {"workspace": ws, "conforms": not any(f["severity"] in ("violation", "unchecked") for f in findings),
                 "findings": findings}
 
     def _norm_findings(self, g: Graph, lang: str) -> List[Dict]:
@@ -633,8 +797,8 @@ class Designs:
             return []
         from pyshacl import validate as shacl
         data = Graph()
-        for t in g:
-            data.add(t)
+        for s, p, o in g:
+            data.add((s, p, _for_shapes(o)))
         for t in tbox:                       # the norms and circuit types the shapes name
             data.add(t)
         _, report, _ = shacl(data, shacl_graph=shapes, inference="none")
@@ -693,6 +857,16 @@ class Designs:
                        or str(g.value(c, DHP.appliance) or "") in TYPE_A_APPLIANCES)
             if needs_a and str(g.value(r, DHC.rcdType)) == "AC":
                 add("violation", "rcd-type-a", c, "rcd_type_a", rcd=str(g.value(r, RDFS.label)))
+        # A value a survey could not read makes the norm shapes pass silently
+        # (SHACL checks what is there): say so, so nothing reads as compliant.
+        for n in sorted(set(g.subjects(DHP.toVerify, Literal(True))), key=lambda n: str(g.value(n, RDFS.label))):
+            if (n, RDF.type, DHC.Circuit) in g:
+                missing = [w for p, w in ((DHC.hasCircuitType, "type"), (DHC.ratedCurrent, "rating"),
+                                          (DHC.crossSection, "section")) if g.value(n, p) is None]
+                add("unchecked", "to-verify", n, "to_verify",
+                    what=", ".join(t["what_" + m] for m in missing) or t["what_values"])
+            else:
+                add("unchecked", "to-verify", n, "to_identify")
         for b in set(g.subjects(RDF.type, DHC.DistributionBoard)):
             cap = int(g.value(b, DHP.rows)) * int(g.value(b, DHP.modulesPerRow))
             used = sum(int(g.value(x, DHP.modules) or 0) for x in g.subjects(DHP.onBoard, b))
@@ -744,7 +918,7 @@ class Designs:
                     desc = f"RCD {self._num(g, x, DHC.ratedCurrent):g} A {self._num(g, x, DHC.sensitivityMA):g} mA type {g.value(x, DHC.rcdType)}"
                     kind = "rcd"
                 else:
-                    kind = next((k for k, (cls, _) in DEVICES.items() if (x, RDF.type, cls) in g), "device")
+                    kind = self._device_kind(g, x)
                     rc = self._num(g, x, DHC.ratedCurrent)
                     desc = f"{kind.replace('_', ' ')}" + (f" {rc:g} A" if rc is not None else "")
                 key = (kind, desc, "", str(g.value(x, DHP.partner) or ""), str(g.value(x, DHP.reference) or ""))
@@ -754,7 +928,8 @@ class Designs:
             key = ("point", str(g.value(p, DHP.kind)), "", str(g.value(p, DHP.partner) or ""), str(g.value(p, DHP.reference) or ""))
             lines[key] += 1
             modules[key] = 0
-        order = {"board": 0, "rcd": 1, "breaker": 2, "contactor": 3, "surge_protector": 4, "device": 5, "point": 6}
+        order = {"board": 0, "rcd": 1, "breaker": 2, "fuse": 2, "contactor": 3, "surge_protector": 4,
+                 "main_breaker": 5, "unidentified": 5, "device": 5, "point": 6}
         return [{"kind": k[0], "description": k[1], "quantity": q, "modules_each": modules[k],
                  "partner": k[3], "reference": k[4]}
                 for k, q in sorted(lines.items(), key=lambda kv: (order.get(kv[0][0], 9), kv[0][1]))]
@@ -829,6 +1004,10 @@ def _texts(lang: str) -> Dict[str, str]:
             "board_over": "The devices take {used} modules, the board has {cap}.",
             "board_reserve": "{used} of {cap} modules used, {free} free: about 20 % ({need}) should stay free for later circuits.",
             "article_norm": "The article {ref} is {why} in its catalogue, not cleared for this workspace ({where}).",
+            "to_verify": "To verify on site ({what}): until then no rule can be checked for it, so it is not compliant either.",
+            "to_identify": "Not identified yet: to verify on site.",
+            "what_type": "what it feeds", "what_rating": "protection rating", "what_section": "cable section",
+            "what_values": "its values",
         },
         "fr": {
             "rcd_count": "La NF C 15-100 demande au moins deux interrupteurs différentiels 30 mA ; ce projet en a {n}. Avec un seul, un défaut sur n'importe quel circuit coupe toute l'installation.",
@@ -838,6 +1017,10 @@ def _texts(lang: str) -> Dict[str, str]:
             "board_over": "Les appareils occupent {used} modules, le tableau en a {cap}.",
             "board_reserve": "{used} modules occupés sur {cap}, {free} libres : environ 20 % ({need}) doivent rester libres pour les extensions.",
             "article_norm": "L'article {ref} est, selon son catalogue, {why} ; il n'est pas validé pour ce projet ({where}).",
+            "to_verify": "À vérifier sur place ({what}) : d'ici là aucune règle ne peut être contrôlée, il n'est donc pas conforme non plus.",
+            "to_identify": "Pas encore identifié : à vérifier sur place.",
+            "what_type": "ce qu'il alimente", "what_rating": "calibre de la protection", "what_section": "section du câble",
+            "what_values": "ses valeurs",
         },
         "de": {
             "rcd_count": "Die NF C 15-100 verlangt mindestens zwei FI-Schutzschalter 30 mA; dieser Entwurf hat {n}. Mit einem schaltet ein Fehler in irgendeinem Stromkreis das ganze Haus ab.",
@@ -847,6 +1030,10 @@ def _texts(lang: str) -> Dict[str, str]:
             "board_over": "Die Geräte belegen {used} Teilungseinheiten, der Verteiler hat {cap}.",
             "board_reserve": "{used} von {cap} Teilungseinheiten belegt, {free} frei: etwa 20 % ({need}) sollten für spätere Stromkreise frei bleiben.",
             "article_norm": "Der Artikel {ref} ist laut Katalog {why}; für dieses Projekt ({where}) ist er nicht freigegeben.",
+            "to_verify": "Vor Ort zu prüfen ({what}): bis dahin kann keine Regel geprüft werden, konform ist er also auch nicht.",
+            "to_identify": "Noch nicht bestimmt: vor Ort zu prüfen.",
+            "what_type": "was er versorgt", "what_rating": "Bemessungsstrom der Sicherung", "what_section": "Leitungsquerschnitt",
+            "what_values": "seine Werte",
         },
     }
     return t.get(lang, t["en"])

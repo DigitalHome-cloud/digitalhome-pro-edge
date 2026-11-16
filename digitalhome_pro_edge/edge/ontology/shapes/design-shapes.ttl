@@ -55,22 +55,35 @@ dhpsh:RCDShape a sh:NodeShape ;
                   sh:message "An RCD's type is AC, A, F or B."@en ] .
 
 dhpsh:DeviceShape a sh:NodeShape ;
-    sh:targetClass dhc:ProtectionDevice , dhc:Contactor , dhc:SurgeProtector ;
-    sh:node dhpsh:Labelled , dhpsh:OnBoard .
+    sh:targetClass dhc:ProtectionDevice , dhc:Contactor , dhc:SurgeProtector , dhp:UnidentifiedDevice ;
+    sh:node dhpsh:Labelled , dhpsh:OnBoard ;
+    sh:property [ sh:path dhp:protectionKind ; sh:maxCount 1 ; sh:in ( "breaker" "fuse" "main_breaker" ) ;
+                  sh:message "A protection device is a breaker, a fuse or the supply's main breaker."@en ] .
 
 dhpsh:CircuitShape a sh:NodeShape ;
     sh:targetClass dhc:Circuit ;
     sh:node dhpsh:Labelled ;
-    sh:property [ sh:path dhc:hasCircuitType ; sh:minCount 1 ; sh:maxCount 1 ;
+    sh:property [ sh:path dhc:hasCircuitType ; sh:maxCount 1 ;
                   sh:message "A circuit has one circuit type."@en ] ;
-    sh:property [ sh:path dhc:ratedCurrent ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:decimal ;
+    sh:property [ sh:path dhc:ratedCurrent ; sh:maxCount 1 ; sh:datatype xsd:decimal ;
                   sh:message "A circuit has one rated current."@en ] ;
-    sh:property [ sh:path dhc:crossSection ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:decimal ;
+    sh:property [ sh:path dhc:crossSection ; sh:maxCount 1 ; sh:datatype xsd:decimal ;
                   sh:message "A circuit has one wire cross-section in mm²."@en ] ;
     sh:property [ sh:path dhc:maxPoints ; sh:maxCount 1 ; sh:datatype xsd:integer ;
                   sh:message "A circuit has at most one number of points."@en ] ;
     sh:property [ sh:path dhc:hasProtection ; sh:minCount 1 ;
-                  sh:message "A circuit is protected by at least its own breaker."@en ] .
+                  sh:message "A circuit is protected by at least its own breaker or fuse."@en ] ;
+    sh:property [ sh:path dhp:toVerify ; sh:maxCount 1 ; sh:datatype xsd:boolean ] ;
+    # A surveyed circuit (an as-is installation) may leave its type, rating
+    # and cross-section unknown, marked dhp:toVerify; the report then lists it
+    # as unchecked. A designed circuit states all three.
+    sh:or (
+        [ sh:property [ sh:path dhp:toVerify ; sh:hasValue true ] ]
+        [ sh:property [ sh:path dhc:hasCircuitType ; sh:minCount 1 ] ;
+          sh:property [ sh:path dhc:ratedCurrent ; sh:minCount 1 ] ;
+          sh:property [ sh:path dhc:crossSection ; sh:minCount 1 ] ]
+    ) ;
+    sh:message "A circuit states its type, rated current and cross-section, or is marked to verify."@en .
 
 dhpsh:RoomShape a sh:NodeShape ;
     sh:targetClass rec:Room ;

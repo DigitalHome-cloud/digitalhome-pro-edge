@@ -70,6 +70,8 @@ CHAT_ALLOWED: List[Tuple[str, str]] = [
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/circuits/circuit-[a-z0-9]{8}/move"),
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}/(place|rename|reference)"),
     ("DELETE", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}"),
+    # history (ADR-0009): name a revision, make a baseline, go back to one (as a new revision)
+    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/revisions/([0-9]{1,5}|latest)/(tag|restore)"),
     ("POST", r"/api/partners"),
     ("POST", r"/api/market/(subscribe|sync)"),
     ("POST", r"/api/partners/[a-z][a-z0-9-]{0,39}/article"),
@@ -102,6 +104,22 @@ it finds; a design that breaks the norm is saved and shown, never refused.
 
 The design is this chat plus the ontologies: the model graph is what you
 build; labels, materials, report and export are only outputs of it.
+
+Every saved state of a design is kept as a numbered revision: revisions()
+lists them, diff() says what changed between two (numbers or tag names),
+tag_revision() names one, restore() goes back to one as a new revision. A
+frozen tag is a baseline, e.g. the installation as surveyed before a
+modernisation ("As-is 1986"): compare the design with it to say what is
+kept, replaced and new. Propose a baseline only for a state the person
+calls the as-is or a delivered one.
+
+Surveying an existing board: write what was read, nothing more. A value not
+read (rating, cable section, what a circuit feeds) is left out, and the
+circuit is then marked to verify; never guess one. Old boards have fuse
+holders (protection "fuse") and often no RCD: put such a circuit on the board
+itself. The supplier's sealed main breaker (e.g. 500 mA) is a main_breaker
+device, not an RCD; a device nobody could identify is "unidentified". Record
+the edition the installation was built under only when its date is known.
 
 Files the person drops on the page are in inbox(); selection() names the one
 just dropped. Read it with read_file() and decide from its content what it is

@@ -52,7 +52,17 @@ shared `inbox/` and `partners/`. A workspace's id is minted (`ws-…`) and
 names its folder; its name can be changed with **Rename**, and the folder
 stays. A workspace belongs to one home on one linked connection (stage,
 prod …), a home you can access in the Portal (ADR-0008); link the edge
-before starting one. The page is in English, German and French:
+before starting one.
+
+Every change to a design is kept as a revision in
+`mydocs/<workspace>/revisions/` (ADR-0009). The **History** tab lists them,
+compares any two, tags one, and restores an earlier one as a new revision.
+A *baseline* is a frozen tag, for example the as-is survey of an old board
+before its modernisation: it can never be moved or removed. A survey may leave
+a circuit's rating or cable section unread. The circuit is then marked to
+verify and the report lists it as unchecked, never as compliant.
+
+The page is in English, German and French:
 pick the language in the header, English by default.
 
 ## Installing without a clone

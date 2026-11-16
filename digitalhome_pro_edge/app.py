@@ -27,6 +27,7 @@ from . import homes as hm
 from . import inbox as ib
 from . import labels as lb
 from . import partners as pt
+from . import revisions as rv
 from . import selection as sel
 from .core import server
 from .edge import cloud
@@ -87,6 +88,20 @@ def run(fn, *args, **kwargs):
         return jsonify({"errors": [str(e)]}), 400
 
 
+@app.before_request
+def _revision_via() -> None:
+    """Who a revision is made through (ADR-0009): an agent names itself with
+    X-Agent (core/mcp_bridge.py); a confirmed chat proposal is replayed through
+    Flask's test client (edge/routes.py), whose requests carry Werkzeug's own
+    User-Agent; everything else is the page."""
+    if request.headers.get("X-Agent"):
+        rv.set_via("mcp")
+    elif request.headers.get("User-Agent", "").startswith("Werkzeug/"):
+        rv.set_via("chat")
+    else:
+        rv.set_via("page")
+
+
 def fields(*names: str) -> dict:
     b = body()
     return {k: b[k] for k in names if k in b}
@@ -144,7 +159,7 @@ def design(ws: str):
 
 @app.post("/api/workspaces/<ws>")
 def set_workspace(ws: str):
-    return run(designs().set_workspace, ws, **fields("title", "status"))
+    return run(designs().set_workspace, ws, **fields("title", "status", "built_under"))
 
 
 @app.get("/api/workspaces/<ws>/report")
@@ -169,6 +184,42 @@ def export(ws: str):
                               headers={"Content-Disposition": f'attachment; filename="{ws}.ttl"'})
 
 
+# ---- history (ADR-0009): every saved state, tags and baselines, compare, restore
+
+@app.get("/api/workspaces/<ws>/revisions")
+def revisions(ws: str):
+    return run(designs().revisions, ws)
+
+
+@app.get("/api/workspaces/<ws>/revisions/<ref>.ttl")
+def revision(ws: str, ref: str):
+    try:
+        ttl = designs().revision(ws, ref)
+    except dz.NotFound:
+        abort(404)
+    return app.response_class(ttl, mimetype="text/turtle")
+
+
+@app.get("/api/workspaces/<ws>/diff")
+def diff(ws: str):
+    return run(designs().diff, ws, request.args.get("from", ""), request.args.get("to", "latest"))
+
+
+@app.post("/api/workspaces/<ws>/revisions/<ref>/tag")
+def tag_revision(ws: str, ref: str):
+    return run(designs().tag_revision, ws, ref, **fields("name", "frozen"))
+
+
+@app.delete("/api/workspaces/<ws>/tags/<name>")
+def untag_revision(ws: str, name: str):
+    return run(designs().untag_revision, ws, name)
+
+
+@app.post("/api/workspaces/<ws>/revisions/<ref>/restore")
+def restore_revision(ws: str, ref: str):
+    return run(designs().restore, ws, ref)
+
+
 @app.get("/workspaces/<ws>/labels")
 def labels(ws: str):
     try:
@@ -190,7 +241,7 @@ def add_board(ws: str):
 
 @app.post("/api/workspaces/<ws>/boards/<board>")
 def set_board(ws: str, board: str):
-    return run(designs().set_board, ws, board, **fields("rows", "modules_per_row"))
+    return run(designs().set_board, ws, board, **fields("rows", "modules_per_row", "built_under"))
 
 
 @app.post("/api/workspaces/<ws>/rcds")
@@ -200,13 +251,15 @@ def add_rcd(ws: str):
 
 @app.post("/api/workspaces/<ws>/devices")
 def add_device(ws: str):
-    return run(designs().add_device, ws, **fields("board", "kind", "label", "rated_current", "modules"))
+    return run(designs().add_device, ws, **fields("board", "kind", "label", "rated_current", "modules",
+                                                  "sensitivity_ma", "to_verify"))
 
 
 @app.post("/api/workspaces/<ws>/circuits")
 def add_circuit(ws: str):
     return run(designs().add_circuit, ws, **fields("rcd", "label", "circuit_type", "rated_current",
-                                                   "cross_section", "points", "appliance", "dedicated"))
+                                                   "cross_section", "points", "appliance", "dedicated",
+                                                   "board", "protection", "to_verify"))
 
 
 @app.post("/api/workspaces/<ws>/circuits/<circuit>/move")
