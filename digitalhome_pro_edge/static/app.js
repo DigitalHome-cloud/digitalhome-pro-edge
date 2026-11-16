@@ -19,6 +19,21 @@ const failed = (err) => (err && err.errors) ? err.errors.join("; ") : t("failed"
 
 const S = { ws: null, item: null, tab: "design", seen: {} };
 
+// A loading indicator in the middle of the screen, for what the person
+// started (a tab, a workspace, a wizard step, a preview); never for the
+// background poll. It shows only when the wait is long enough to notice.
+let busyN = 0, busyT = null;
+function busyOn() {
+  if (busyN++ === 0) busyT = setTimeout(() => { $("#busy").hidden = false; }, 150);
+}
+function busyOff() {
+  if (busyN > 0 && --busyN === 0) { clearTimeout(busyT); $("#busy").hidden = true; }
+}
+async function busy(work) {
+  busyOn();
+  try { return await (typeof work === "function" ? work() : work); } finally { busyOff(); }
+}
+
 function hashState() {
   const h = new URLSearchParams(location.hash.slice(1));
   return { ws: h.get("w"), item: h.get("i") };
@@ -35,7 +50,7 @@ async function select(ws, item) {
   ex.hidden = !ws;
   if (ws) ex.href = `/api/workspaces/${encodeURIComponent(ws)}/export.ttl`;
   S.seen = {};
-  refresh();
+  busy(refresh);
 }
 
 // ----------------------------------------------------------- the list ----
@@ -663,9 +678,13 @@ async function symbolList() {
   return S.symbols;
 }
 
-async function drawLabels() {
+// typing in a text or number field: the poll waits; what the person clicked redraws at once
+const typing = (box) => box.contains(document.activeElement)
+  && document.activeElement.matches("input:not([type=checkbox]):not([type=radio]), textarea");
+
+async function drawLabels(force = false) {
   const box = $("#tab-labels");
-  if (box.contains(document.activeElement) && document.activeElement.matches("input, select")) return;  // typing
+  if (!force && typing(box)) return;
   const wsq = encodeURIComponent(S.ws);
   const [d, syms] = await Promise.all([core.api("GET", `/api/workspaces/${wsq}/labels`), symbolList()]);
   const step = S.lstep || "what";
@@ -674,8 +693,9 @@ async function drawLabels() {
   S.seen.labels = key;
   const s = d.settings;
   const save = async (patch) => {
-    try { await core.api("POST", `/api/workspaces/${wsq}/labels/settings`, patch); } catch (err) { core.toast(failed(err)); }
-    S.seen.labels = null; drawLabels();
+    if (document.activeElement && box.contains(document.activeElement)) document.activeElement.blur();
+    try { await busy(core.api("POST", `/api/workspaces/${wsq}/labels/settings`, patch)); } catch (err) { core.toast(failed(err)); }
+    S.seen.labels = null; return busy(() => drawLabels(true));
   };
   const nwarn = d.labels.reduce((n, l) => n + l.warnings.length, 0);
   const nav = `<ol class="lw-steps">${LSTEPS.map((k, i) => `<li><button data-step="${k}" class="${k === step ? "is-on" : ""}">
@@ -760,7 +780,7 @@ async function drawLabels() {
     <div class="lw-foot">${i > 0 ? `<button class="lw-prev">← ${esc(t(`lw.${LSTEPS[i - 1]}`))}</button>` : ""}
       ${i < LSTEPS.length - 1 ? `<button class="primary lw-next">${esc(t(`lw.${LSTEPS[i + 1]}`))} →</button>` : ""}</div>`;
 
-  const go = (k) => { S.lstep = k; if (k === "print") S.lprint = Date.now(); S.seen.labels = null; drawLabels(); };
+  const go = (k) => { S.lstep = k; if (k === "print") S.lprint = Date.now(); S.seen.labels = null; return busy(() => drawLabels(true)); };
   box.querySelectorAll(".lw-steps button").forEach((b) => b.onclick = () => go(b.dataset.step));
   const prev = box.querySelector(".lw-prev"); if (prev) prev.onclick = () => go(LSTEPS[i - 1]);
   const next = box.querySelector(".lw-next"); if (next) next.onclick = () => go(LSTEPS[i + 1]);
@@ -773,8 +793,8 @@ async function drawLabels() {
   const sup = box.querySelector(".lw-supply");
   if (sup) sup.onchange = async () => {
     if (!sup.value) return;
-    try { await core.api("POST", `/api/workspaces/${wsq}`, { supply: sup.value }); } catch (err) { core.toast(failed(err)); }
-    S.seen.labels = null; drawLabels();
+    try { await busy(core.api("POST", `/api/workspaces/${wsq}`, { supply: sup.value })); } catch (err) { core.toast(failed(err)); }
+    S.seen.labels = null; return busy(() => drawLabels(true));
   };
   const fmt = box.querySelector(".lw-format");
   if (fmt) {
@@ -784,9 +804,9 @@ async function drawLabels() {
   }
   const item = (el) => el.closest("tr").dataset.item;
   const post = async (el, path, data) => {
-    try { await core.api("POST", `/api/workspaces/${wsq}/items/${encodeURIComponent(item(el))}/${path}`, data); }
+    try { await busy(core.api("POST", `/api/workspaces/${wsq}/items/${encodeURIComponent(item(el))}/${path}`, data)); }
     catch (err) { core.toast(failed(err)); }
-    el.blur(); S.seen.labels = null; drawLabels();
+    el.blur(); S.seen.labels = null; return busy(() => drawLabels(true));
   };
   box.querySelectorAll(".lw-text").forEach((x) => x.onchange = () => post(x, "label", { text: x.value }));
   box.querySelectorAll(".lw-short").forEach((x) => x.onchange = () => post(x, "label", { short: x.value }));
@@ -800,18 +820,20 @@ async function drawLabels() {
   });
   const bal = box.querySelector(".lw-balance");
   if (bal) bal.onclick = async () => {
-    try { S.lplan = await core.api("GET", `/api/workspaces/${wsq}/phase-plan`); } catch (err) { core.toast(failed(err)); }
-    S.seen.labels = null; drawLabels();
+    try { S.lplan = await busy(core.api("GET", `/api/workspaces/${wsq}/phase-plan`)); } catch (err) { core.toast(failed(err)); }
+    S.seen.labels = null; return busy(() => drawLabels(true));
   };
-  const px = box.querySelector(".lw-plan-x"); if (px) px.onclick = () => { S.lplan = null; S.seen.labels = null; drawLabels(); };
+  const px = box.querySelector(".lw-plan-x"); if (px) px.onclick = () => { S.lplan = null; S.seen.labels = null; return busy(() => drawLabels(true)); };
   const apply = box.querySelector(".lw-apply");
   if (apply) apply.onclick = async () => {
     apply.disabled = true;
+    busyOn();
     for (const a of S.lplan.assign) {
       try { await core.api("POST", `/api/workspaces/${wsq}/items/${encodeURIComponent(a.item)}/phase`, { phase: a.phase }); }
       catch (err) { core.toast(failed(err)); break; }
     }
-    S.lplan = null; S.seen.labels = null; drawLabels();
+    busyOff();
+    S.lplan = null; S.seen.labels = null; return busy(() => drawLabels(true));
   };
   const ask = box.querySelector(".lw-ask");
   if (ask) ask.onclick = () => {
@@ -822,6 +844,13 @@ async function drawLabels() {
     form.requestSubmit();
     core.toast(t("lw.asked"));
   };
+  const frame = box.querySelector(".lw-preview");
+  if (frame) {                                  // the sheet renders in the frame: wait for it
+    busyOn();
+    const done = () => { if (frame.dataset.done) return; frame.dataset.done = "1"; busyOff(); };
+    frame.addEventListener("load", done);
+    setTimeout(done, 15000);
+  }
   const pr = box.querySelector(".lw-print");
   if (pr) pr.onclick = () => { const f = box.querySelector(".lw-preview"); if (f && f.contentWindow) f.contentWindow.print(); };
 }
@@ -838,7 +867,7 @@ async function refresh() {
     if (S.tab === "design") await drawDesign();
     if (S.tab === "report") await drawReport();
     if (S.tab === "bom") await drawBom();
-    if (S.tab === "labels") await drawLabels();
+    if (S.tab === "labels") await drawLabels();   // the poll: not while typing
     if (S.tab === "history") await drawHistory();
   } catch (err) {
     if (err && err.status === 404 && S.ws) select(null);
@@ -852,7 +881,7 @@ function wire() {
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("is-on", x === b));
     document.querySelectorAll(".tab").forEach((t) => t.hidden = t.id !== `tab-${S.tab}`);
     S.seen = {};
-    refresh();
+    busy(refresh);
   });
   $("#nw-make").onclick = async () => {
     try {

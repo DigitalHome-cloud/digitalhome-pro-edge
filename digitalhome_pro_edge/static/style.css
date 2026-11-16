@@ -232,3 +232,13 @@ button.restore.sure { border-color: var(--danger); color: var(--danger); }
 .lw-preview { width: 100%; height: 70vh; border: 1px solid var(--edge); border-radius: var(--radius); background: #ddd; }
 .lw-foot { display: flex; justify-content: space-between; margin-top: 14px; }
 .lw-foot .lw-next { margin-left: auto; }
+
+/* the loading indicator: the middle of the screen, over everything */
+.busy { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; gap: 10px; align-items: center;
+        justify-content: center; background: color-mix(in srgb, var(--bg) 45%, transparent); pointer-events: all; }
+.busy[hidden] { display: none; }
+.busy__spin { width: 42px; height: 42px; border-radius: 50%; border: 4px solid var(--edge); border-top-color: var(--accent);
+              animation: busy-spin 0.8s linear infinite; }
+.busy span { font-size: 13px; color: var(--muted); background: var(--panel); padding: 2px 10px; border-radius: 999px; }
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .busy__spin { animation-duration: 2.4s; } }

@@ -179,7 +179,7 @@ def test_points_get_small_tags_that_open_their_card_and_never_name_the_address(d
     assert rows[p]["kind"] == "point" and rows[p]["card"].endswith(f"i={p}")
     assert "no_room" in {w["code"] for w in rows[sw]["warnings"]}
     page = lb.sheet(d.design(ws), CARDS, settings={"kind": "tag", "tag_mm": 15})
-    assert page.count('class="tag"') == 2 + 0          # the two points; the board has no other devices
+    assert page.count('class="tag"') == 2 + 4          # the two points, then the RCD and the three circuits
     assert f"portal.example/id/?h=h-abcdefghjk&amp;i={p}" in page
     assert "DE-00000-ABC1-01" not in page              # the SmartHome ID spells an address
     assert "width: 15mm" in page.replace("15.0mm", "15mm")

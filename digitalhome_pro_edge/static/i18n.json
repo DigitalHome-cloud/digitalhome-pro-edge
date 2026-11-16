@@ -257,13 +257,14 @@
   "lw.openTab": "Open in a tab",
   "lw.printHint": "A4, at 100 % (“actual size”), not “fit to page”.",
   "lw.k.tag": "Small QR tags",
-  "lw.k.tagHint": "For sockets, switches, outlets and devices, inside the cover: the QR opens the item's ID card in the Portal",
+  "lw.k.tagHint": "For sockets, switches and devices (inside the cover), or any circuit or RCD: the QR opens its ID card in the Portal",
   "lw.tagSize": "QR size, mm",
   "lw.tagHint": "20 mm reads from 5–10 cm; use polyester or vinyl stock, paper comes loose in a box",
   "lw.cardsTo": "QR codes open the ID card on {site}: only the home's owners see it, after signing in.",
   "lw.noCardsTitle": "No QR codes yet",
   "lw.noCards": "Attach this workspace to its home on a linked connection: a code opens the item's card in the Portal, never this computer.",
-  "lw.pushNote": "The card shows what was last pushed or published: push the option after changing the design."
+  "lw.pushNote": "The card shows what was last pushed or published: push the option after changing the design.",
+  "busy": "loading…"
  },
  "de": {
   "toolbar.labels": "Etiketten",
@@ -523,13 +524,14 @@
   "lw.openTab": "In neuem Tab öffnen",
   "lw.printHint": "A4, mit 100 % („tatsächliche Größe“), nicht „an Seite anpassen“.",
   "lw.k.tag": "Kleine QR-Etiketten",
-  "lw.k.tagHint": "Für Steckdosen, Schalter, Dosen und Geräte, innen im Deckel: der QR öffnet den Steckbrief im Portal",
+  "lw.k.tagHint": "Für Steckdosen, Schalter und Geräte (innen im Deckel) oder jeden Stromkreis und FI: der QR öffnet den Steckbrief im Portal",
   "lw.tagSize": "QR-Größe, mm",
   "lw.tagHint": "20 mm liest sich aus 5–10 cm; Polyester- oder Vinyl-Etiketten, Papier löst sich in der Dose",
   "lw.cardsTo": "QR-Codes öffnen den Steckbrief auf {site}: nur die Eigentümer sehen ihn, nach der Anmeldung.",
   "lw.noCardsTitle": "Noch keine QR-Codes",
   "lw.noCards": "Diesen Arbeitsbereich seinem Haus auf einer verbundenen Instanz zuordnen: ein Code öffnet den Steckbrief im Portal, nie diesen Rechner.",
-  "lw.pushNote": "Der Steckbrief zeigt den zuletzt hochgeladenen oder veröffentlichten Stand: nach Änderungen die Option hochladen."
+  "lw.pushNote": "Der Steckbrief zeigt den zuletzt hochgeladenen oder veröffentlichten Stand: nach Änderungen die Option hochladen.",
+  "busy": "wird geladen…"
  },
  "fr": {
   "toolbar.labels": "Étiquettes",
@@ -789,13 +791,14 @@
   "lw.openTab": "Ouvrir dans un onglet",
   "lw.printHint": "A4, à 100 % (« taille réelle »), pas « ajuster à la page ».",
   "lw.k.tag": "Petites étiquettes QR",
-  "lw.k.tagHint": "Pour prises, interrupteurs, boîtes et appareils, sous le couvercle : le QR ouvre la fiche dans le Portail",
+  "lw.k.tagHint": "Pour prises, interrupteurs et appareils (sous le couvercle), ou tout circuit et différentiel : le QR ouvre sa fiche dans le Portail",
   "lw.tagSize": "Taille du QR, mm",
   "lw.tagHint": "20 mm se lit à 5–10 cm ; étiquettes polyester ou vinyle, le papier se décolle dans une boîte",
   "lw.cardsTo": "Les QR ouvrent la fiche sur {site} : seuls les propriétaires la voient, après connexion.",
   "lw.noCardsTitle": "Pas encore de QR",
   "lw.noCards": "Rattachez cet espace à sa maison sur une connexion liée : un code ouvre la fiche dans le Portail, jamais cet ordinateur.",
-  "lw.pushNote": "La fiche montre ce qui a été poussé ou publié en dernier : poussez l'option après une modification."
+  "lw.pushNote": "La fiche montre ce qui a été poussé ou publié en dernier : poussez l'option après une modification.",
+  "busy": "chargement…"
  },
  "edge": {
   "de": {

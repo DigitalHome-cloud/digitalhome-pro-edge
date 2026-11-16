@@ -21,9 +21,9 @@ Three layouts:
          supply, a bar with its phase in the IEC 60445 colours
   grid   QR labels, 70 × 37 mm, 3 × 8 = 24 per sheet: one per RCD, circuit
          and device, in board order
-  tag    small QR stickers for the points (sockets, lights, switches,
-         outlets) and the devices, to go inside a cover: a square code of
-         15 to 25 mm and two short lines below it
+  tag    small QR stickers: the points (sockets, lights, switches,
+         outlets) to go inside a cover, then every RCD, circuit and device
+         of the boards; a square code of 15 to 25 mm, two short lines below
   cable  wrap-around cable labels, two per circuit (the board end and the
          far end): the text fills the first half, the blank second half
          wraps over it around the cable. The length is 2 × π × the cable's
@@ -574,9 +574,10 @@ def _tag_sheets(design: Dict, cards: Optional[Dict], title: str, s: Dict) -> str
     """Small QR tags, for inside the cover of a socket, a switch or a
     device: the code, two short lines, the address in small type."""
     picked = set(s["items"])
+    # the points first (inside their covers), then everything on the board in its order
     tags = [p for p in point_labels(design) if not picked or p["item"] in picked]
     tags += [c for b in layout(design) for r in b["rows"] for c in r["cells"]
-             if not c.get("free") and c["kind"] not in ("circuit", "rcd") and (not picked or c["item"] in picked)]
+             if not c.get("free") and (not picked or c["item"] in picked)]
     q = s["tag_mm"]
     w, h = q + 4, q + 12
     usable_w, usable_h = PAGE_W - 2 * MARGIN, PAGE_H - 2 * MARGIN
@@ -607,8 +608,10 @@ def _tag_sheets(design: Dict, cards: Optional[Dict], title: str, s: Dict) -> str
  .tag i {{ font: 3.2pt system-ui; color: #555; font-style: normal; white-space: nowrap; overflow: hidden; max-width: 100%; }}
  .tag b {{ font-size: 6pt; line-height: 1.1; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
  .tag small {{ font-size: 5pt; color: #333; }}"""
+    note = NO_CARDS if not cards else ("" if tags else "Nothing to tag: the design has no sockets, switches, "
+                                                         "devices or circuits yet, or none is picked in the wizard")
     return _page(title, "".join(out), _controls("tag", s["skip"], s["module_mm"], s["strip_h"], len(tags), len(pages),
-                                                "" if cards else NO_CARDS), css)
+                                                note), css)
 
 
 def _phase_bar(phase: str) -> str:
