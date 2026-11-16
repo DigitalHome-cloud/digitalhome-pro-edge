@@ -207,11 +207,13 @@ class History:
         self._write(self.dir / TAGS, json.dumps(tags, indent=1, ensure_ascii=False))
         return {"name": name, **tags[name]}
 
-    def untag(self, name: str) -> None:
+    def untag(self, name: str, withdrawn: bool = False) -> None:
+        """Remove a tag. A baseline stays, unless the cloud withdrew the
+        configuration version it names (`withdrawn`, configs.withdraw)."""
         tags = self.tags()
         if name not in tags:
             raise RevisionError(f"no tag {name}")
-        if tags[name].get("frozen"):
+        if tags[name].get("frozen") and not withdrawn:
             raise RevisionError(f"{name} is a baseline and cannot be removed")
         del tags[name]
         self._write(self.dir / TAGS, json.dumps(tags, indent=1, ensure_ascii=False))

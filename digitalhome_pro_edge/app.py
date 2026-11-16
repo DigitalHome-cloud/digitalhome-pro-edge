@@ -259,6 +259,17 @@ def configuration_promote(ws: str):
     return run(configs().promote, ws)
 
 
+@app.post("/api/workspaces/<ws>/configuration/withdraw")
+def configuration_withdraw(ws: str):
+    # a live major that changed nothing goes back: a person's act
+    return run(configs().withdraw, ws, **fields("version"))
+
+
+@app.post("/api/workspaces/<ws>/vault/tag")
+def vault_tag(ws: str):
+    return run(configs().vault_tag, ws, **fields("items", "add", "remove"))
+
+
 @app.get("/api/workspaces/<ws>/vault")
 def vault_items(ws: str):
     return run(configs().vault_items, ws, request.args.get("configVersion", ""))
@@ -278,9 +289,12 @@ def labels(ws: str):
     try:
         skip = int(request.args.get("skip", 0))
         module = float(request.args.get("module", lb.MODULE_MM))
+        height = float(request.args.get("height", lb.STRIP_H))
     except ValueError:
-        abort(400, "skip and module are numbers")
-    return lb.sheet(d, request.host_url, request.args.get("layout", "grid"), skip, module)
+        abort(400, "skip, module and height are numbers")
+    if not (9 <= module <= 27 and 10 <= height <= 60):
+        abort(400, "module is 9 to 27 mm, height 10 to 60 mm")
+    return lb.sheet(d, request.host_url, request.args.get("layout", "strip"), skip, module, height)
 
 
 @app.post("/api/workspaces/<ws>/boards")
@@ -295,7 +309,13 @@ def set_board(ws: str, board: str):
 
 @app.post("/api/workspaces/<ws>/rcds")
 def add_rcd(ws: str):
-    return run(designs().add_rcd, ws, **fields("board", "label", "rated_current", "sensitivity_ma", "rcd_type", "to_verify"))
+    return run(designs().add_rcd, ws, **fields("board", "label", "rated_current", "sensitivity_ma", "rcd_type", "to_verify",
+                                               "poles"))
+
+
+@app.post("/api/workspaces/<ws>/position")
+def position_item(ws: str):
+    return run(designs().position, ws, **fields("item", "row", "slot"))
 
 
 @app.post("/api/workspaces/<ws>/devices")
@@ -308,7 +328,7 @@ def add_device(ws: str):
 def add_circuit(ws: str):
     return run(designs().add_circuit, ws, **fields("rcd", "label", "circuit_type", "rated_current",
                                                    "cross_section", "points", "appliance", "dedicated",
-                                                   "board", "protection", "to_verify"))
+                                                   "board", "protection", "to_verify", "poles", "modules"))
 
 
 @app.post("/api/workspaces/<ws>/circuits/<circuit>/move")

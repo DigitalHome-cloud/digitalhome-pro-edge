@@ -52,7 +52,7 @@ def test_build_read_and_report_over_http(client):
 
 def test_label_sheet_has_one_qr_per_device(client):
     w, b, r, c = build(client)
-    page = client.get(f"/workspaces/{w}/labels").get_data(as_text=True)
+    page = client.get(f"/workspaces/{w}/labels?layout=grid").get_data(as_text=True)
     assert page.count("<svg") == 2                                     # the RCD and the circuit
     assert "Lights" in page and "window.print()" in page
 
@@ -96,10 +96,10 @@ def big_design():
 
 
 def test_grid_fills_a4_sheets_of_24_and_skips_used_cells():
-    page = lb.sheet(big_design(), "http://127.0.0.1:8773/")
+    page = lb.sheet(big_design(), "http://127.0.0.1:8773/", layout="grid")
     assert page.count('class="sheet"') == 2                       # 32 labels → 2 sheets of 24
     assert "size: A4 portrait" in page and page.count("<svg") == 32
-    skipped = lb.sheet(big_design(), "http://127.0.0.1:8773/", skip=20)
+    skipped = lb.sheet(big_design(), "http://127.0.0.1:8773/", layout="grid", skip=20)
     assert skipped.count('class="lbl used"') == 20 and skipped.count('class="sheet"') == 3   # 20 + 32 = 52 cells
 
 
@@ -108,8 +108,9 @@ def test_strips_follow_the_board_rows_and_fit_the_sheet():
     assert all(sum(c["width"] for c in r["cells"]) <= lb.PAGE_H - 2 * lb.MARGIN for r in rows)
     first = rows[0]["cells"]
     assert first[0]["kind"] == "rcd" and first[0]["width"] == 2 * lb.MODULE_MM
-    modules = sum(c["modules"] for r in rows for c in r["cells"])
+    modules = sum(c["modules"] for r in rows for c in r["cells"] if not c.get("free"))
     assert modules == 2 + 30 + 1
+    assert sum(c["modules"] for r in rows for c in r["cells"]) == 3 * 13      # the rest are blanks
     page = lb.sheet(big_design(), "http://x/", layout="strip")
     assert "size: A4 landscape" in page
 

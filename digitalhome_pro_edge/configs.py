@@ -229,6 +229,27 @@ class Configs:
         self._set(ws, f"{link['option']} promoted to {r['id']}", option="", optionVersion="", basedOn=r["id"])
         return r
 
+    def withdraw(self, ws: str, version: str = "") -> Dict[str, Any]:
+        """Take back a live major that changed nothing (promoted from an option
+        identical to the live version). The version before it is live again;
+        the cloud removes the version and its option and refuses anything
+        else. Here the link goes back to that version and the baseline tag
+        goes. A person's act."""
+        link = self.link(ws)
+        vid = version or link["basedOn"]
+        if not vid:
+            raise ConfigError("say which version to withdraw")
+        r = self._call(ws, "withdraw", {"id": vid})
+        if r.get("status") != "ok":
+            raise ConfigError(self._why(r))
+        try:
+            self.d._history(ws).untag(vid, withdrawn=True)
+        except rv.RevisionError:
+            pass                                    # never tagged here
+        if link["basedOn"] == vid:
+            self._set(ws, f"{vid} withdrawn: {r['id']} is live again", basedOn=r["id"], option="", optionVersion="")
+        return {**r, "withdrawn": vid}
+
     @staticmethod
     def _why(r: Dict[str, Any]) -> str:
         if r.get("status") == "conflict":
@@ -288,7 +309,30 @@ class Configs:
         return {"group": group, "files": out}
 
     def vault_items(self, ws: str, config_version: str = "") -> Dict[str, Any]:
-        return self._vault(ws, "items", {"configVersion": config_version} if config_version else {})
+        return self._vault(ws, "items", {"tag": config_version} if config_version else {})
+
+    def vault_tag(self, ws: str, items: Optional[List[str]] = None, add: Optional[List[str]] = None,
+                  remove: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Add and remove version tags (version or option ids, or "0001-0000"
+        short for this home's) on several vault items at once. `items`: their
+        names or SHA-256s; none means every item."""
+        home = self.home_id(ws)
+        full = lambda t: t if str(t).startswith(home) else f"{home}-{t}"  # noqa: E731
+        add = [full(t) for t in (add or []) if str(t).strip()]
+        remove = [full(t) for t in (remove or []) if str(t).strip()]
+        if not add and not remove:
+            raise ConfigError("say which tags to add or remove")
+        known = self._vault(ws, "items", {}).get("items", [])
+        wanted = [str(x) for x in (items or [])]
+        picked = [i for i in known if not wanted or i["sha256"] in wanted or i["name"] in wanted]
+        missing = [w for w in wanted if not any(w in (i["sha256"], i["name"]) for i in known)]
+        if missing:
+            raise ConfigError(f"not in the vault: {', '.join(missing)}")
+        if not picked:
+            return {"status": "ok", "items": []}
+        r = self._vault(ws, "tag", {"sha256s": [i["sha256"] for i in picked], "add": add, "remove": remove})
+        names = {i["sha256"]: i["name"] for i in picked}
+        return {"status": r.get("status"), "items": [{"name": names.get(x["sha256"]), **x} for x in r.get("items", [])]}
 
 
 def as_json(x: Any) -> str:

@@ -228,7 +228,8 @@ def new_workspace(title: str, home: str, country: str = "FR", connection: str = 
     """Start a workspace (a project) for a home. The home is a SmartHome ID
     from cloud_homes(); the edge must be linked, and the workspace belongs to
     that home on that connection (stage, prod …; default the current one).
-    The country chooses the norm (FR: NF C 15-100)."""
+    The country chooses the norm (FR: NF C 15-100, BE: RGIE); another
+    country gets no norm checks."""
     return act(f"New workspace “{title}” for home {home}", "POST", "/api/workspaces",
                _clean(title=title, home=home, country=country, connection=connection))
 
@@ -276,15 +277,25 @@ def set_board(workspace: str, board: str, rows: int = 0, modules_per_row: int = 
 
 @server.tool()
 def add_rcd(workspace: str, board: str, label: str, rated_current: float = 40,
-            sensitivity_ma: float = 30, rcd_type: str = "A", to_verify: bool = False) -> dict:
-    """A residual-current device (2 modules) on a board: rating in A,
-    sensitivity in mA, type AC, A, F or B. to_verify=True when a survey
-    could not read, or a quote does not state, its rating or type: pass
-    rated_current=0 and rcd_type="" for what is unknown, never a guess."""
+            sensitivity_ma: float = 30, rcd_type: str = "A", to_verify: bool = False, poles: int = 2) -> dict:
+    """A residual-current device on a board: rating in A, sensitivity in mA,
+    type AC, A, F or B, poles 2 or 4 (as many modules). to_verify=True when
+    a survey could not read, or a quote does not state, its rating or type:
+    pass rated_current=0 and rcd_type="" for what is unknown, never a guess."""
     body = {"board": board, "label": label, "sensitivity_ma": sensitivity_ma, "to_verify": bool(to_verify),
-            "rated_current": rated_current or None, "rcd_type": rcd_type or None}
+            "rated_current": rated_current or None, "rcd_type": rcd_type or None, "poles": poles}
     what = f"{rated_current:g} A" if rated_current else "? A"
     return act(f"Add RCD “{label}” {what} {sensitivity_ma:g} mA type {rcd_type or '?'}", "POST", _ws(workspace) + "/rcds", body)
+
+
+@server.tool()
+def set_position(workspace: str, item: str, row: int = 0, slot: int = 0) -> dict:
+    """Where an item sits on its board, as read on site: row (1 = top) and
+    the module it starts at in that row (1 = left). item: an RCD, a device
+    or a circuit (its breaker). row=0 clears it. The board strips follow it."""
+    body = {"item": item, "row": row, "slot": slot} if row else {"item": item}
+    return act(f"Place {item}" + (f" at row {row}, slot {slot}" if row else " nowhere"), "POST",
+               _ws(workspace) + "/position", body)
 
 
 @server.tool()
@@ -294,8 +305,8 @@ def add_device(workspace: str, board: str, kind: str, label: str,
     """Another board device: contactor (e.g. day/night for the water heater),
     surge_protector, breaker or fuse (e.g. the 2 A control circuit),
     main_breaker (the supply's own, e.g. Enedis 500 mA 45 A: give
-    sensitivity_ma; it takes no modules), or unidentified (seen in a survey,
-    not known yet). modules: leave out for the usual width."""
+    sensitivity_ma; it takes no modules), bell_transformer, or unidentified
+    (seen in a survey, not known yet). modules: leave out for the usual width."""
     return act(f"Add {kind.replace('_', ' ')} “{label}”", "POST", _ws(workspace) + "/devices",
                _clean(board=board, kind=kind, label=label, rated_current=rated_current or None,
                       modules=modules if modules >= 0 else None, sensitivity_ma=sensitivity_ma or None,
@@ -305,7 +316,8 @@ def add_device(workspace: str, board: str, kind: str, label: str,
 @server.tool()
 def add_circuit(workspace: str, label: str, rcd: str = "", circuit_type: str = "",
                 rated_current: float = 0, cross_section: float = 0, points: int = 0, appliance: str = "",
-                board: str = "", protection: str = "breaker", to_verify: bool = False) -> dict:
+                board: str = "", protection: str = "breaker", to_verify: bool = False, poles: int = 1,
+                modules: int = 0) -> dict:
     """A circuit and its own breaker (or fuse) below an RCD. circuit_type:
     lighting, socket, cooking, water_heater, heating, floor_heating,
     ev_charger, dedicated (then say the appliance: washing_machine,
@@ -315,14 +327,20 @@ def add_circuit(workspace: str, label: str, rcd: str = "", circuit_type: str = "
     Surveying an existing (old) board: give `board` instead of `rcd` when the
     circuit is below no RCD, protection="fuse" for a fuse holder, and leave
     out what was not read (type, rating, section): the circuit is then marked
-    to verify. Never guess a value."""
+    to verify. Never guess a value.
+
+    poles: of the circuit's own breaker, 1 to 3 (as many modules). On a
+    Belgian 3 × 230 V supply a single-phase circuit's breaker has 2 poles,
+    a three-phase one (a hob) 3. modules: only for a compact breaker
+    narrower than one module per pole (a 2-pole breaker in 1 module)."""
     what = " ".join(x for x in (f"{rated_current:g} A" if rated_current else "",
                                 f"{cross_section:g} mm²" if cross_section else "") if x) or "to verify"
     return act(f"Add circuit “{label}” {what}", "POST", _ws(workspace) + "/circuits",
                _clean(rcd=rcd, board=board, label=label, circuit_type=circuit_type,
                       rated_current=rated_current or None, cross_section=cross_section or None,
                       points=points or None, appliance=appliance,
-                      protection=protection if protection != "breaker" else None, to_verify=to_verify or None))
+                      protection=protection if protection != "breaker" else None, to_verify=to_verify or None,
+                      poles=poles if poles != 1 else None, modules=modules or None))
 
 
 @server.tool()
@@ -444,12 +462,12 @@ def push_option(workspace: str) -> dict:
     return act(f"Push {workspace} to its planning option", "POST", _ws(workspace) + "/configuration/push", {})
 
 
-def _person_only(what: str, method: str, path: str) -> dict:
+def _person_only(what: str, method: str, path: str, body: dict | None = None) -> dict:
     """Publishing a first live configuration and promoting an option cannot
     be undone: only a person does them. In the chat panel this proposes;
     elsewhere it points to the page."""
     if confirm_in_panel():
-        return act(what, method, path, {})
+        return act(what, method, path, body or {})
     return {"status": "not done", "why": f"{what} is a person's act: do it on the page (History → Cloud), "
             "or propose it in the edge's chat panel."}
 
@@ -471,9 +489,28 @@ def promote_option(workspace: str) -> dict:
 
 
 @server.tool()
+def withdraw_version(workspace: str, version: str = "") -> dict:
+    """Propose taking back a live major that changed nothing (an option
+    promoted unchanged). The cloud refuses any version that changed
+    something; the one before it becomes live again."""
+    return _person_only(f"Withdraw {version or 'the live version'} of {workspace}", "POST",
+                        _ws(workspace) + "/configuration/withdraw", {"version": version} if version else {})
+
+
+@server.tool()
+def tag_vault_items(workspace: str, add: list[str] | None = None, remove: list[str] | None = None,
+                    items: list[str] | None = None) -> dict:
+    """Tag vault items with the configuration versions they document (one
+    photo may show several): add / remove version or option ids, or the
+    short form "0001-0000". items: names or SHA-256s; none means all."""
+    return act(f"Tag {len(items) if items else 'every'} vault item(s) of {workspace}", "POST",
+               _ws(workspace) + "/vault/tag", {"items": items or [], "add": add or [], "remove": remove or []})
+
+
+@server.tool()
 def vault(workspace: str, config_version: str = "") -> dict:
-    """The home's vault: photos and documents, each grouped under the
-    configuration version or option it documents."""
+    """The home's vault: photos and documents, each with the configuration
+    versions or options it documents (its tags); config_version filters."""
     return _get(_ws(workspace) + "/vault" + (f"?configVersion={_q(config_version)}" if config_version else ""))
 
 

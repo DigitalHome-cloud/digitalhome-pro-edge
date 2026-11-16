@@ -60,6 +60,22 @@ class FakeCloud:
             o["status"] = "promoted"
             self.versions.append({"id": f"{HID}-0002-0000", "version": "0002-0000", "ttl": o["ttl"]})
             return {"status": "ok", "id": f"{HID}-0002-0000", "version": "0002-0000", "summary": "~"}
+        if route == "withdraw":
+            assert body["id"] == live and len(self.versions) > 1
+            self.versions.pop()
+            before = self.versions[-1]
+            return {"status": "ok", "id": before["id"], "version": before["version"], "summary": "withdrew"}
+        if route == "items":
+            items = [{"sha256": s, "name": v["name"], "tags": v.setdefault("tags", [v["configVersion"]] if v.get("configVersion") else [])}
+                     for s, v in self.vault.items()]
+            return {"homeId": HID, "items": [i for i in items if not body.get("tag") or body["tag"] in i["tags"]]}
+        if route == "tag":
+            out = []
+            for s in body["sha256s"]:
+                v = self.vault[s]
+                v["tags"] = sorted((set(v.get("tags", [])) | set(body["add"])) - set(body["remove"]))
+                out.append({"sha256": s, "tags": v["tags"]})
+            return {"status": "ok", "items": out}
         if route == "upload":
             out = []
             for f in body["files"]:
@@ -162,3 +178,39 @@ def test_a_workspace_without_a_connection_says_so(d, fake):
     ws = d.new_workspace("Local", HOME)["workspace"]
     with pytest.raises(cf.ConfigError, match="no connection"):
         cf.Configs(d).status(ws)
+
+
+def test_an_unchanged_promote_is_withdrawn_and_the_baseline_tag_goes(d, fake):
+    ws, _ = survey(d)
+    c = cf.Configs(d)
+    c.publish_first_live(ws)
+    c.create_option(ws, "Baseline")
+    c.promote(ws)                                                        # the fake cloud has no guard
+    assert c.link(ws)["basedOn"] == f"{HID}-0002-0000"
+    r = c.withdraw(ws)
+    assert r["id"] == f"{HID}-0001-0000" and r["withdrawn"] == f"{HID}-0002-0000"
+    assert c.link(ws)["basedOn"] == f"{HID}-0001-0000"
+    tags = {t["name"] for rev in d.revisions(ws) for t in rev["tags"]}
+    assert f"{HID}-0002-0000" not in tags and f"{HID}-0001-0000" in tags
+    with pytest.raises(ValueError, match="baseline"):
+        d.untag_revision(ws, f"{HID}-0001-0000")                         # a baseline still stays
+
+
+def test_vault_items_are_tagged_several_at_once(d, fake):
+    ws, _ = survey(d)
+    c = cf.Configs(d)
+    files = d.kb.folder(ws) / "files"
+    files.mkdir(parents=True)
+    (files / "a.jpg").write_bytes(b"a")
+    (files / "b.jpg").write_bytes(b"b")
+    c.publish_first_live(ws)
+    c.vault_upload(ws, dry_run=False)
+    r = c.vault_tag(ws, add=["0002-0000"])                               # none named: every item; short ids
+    assert {i["name"]: i["tags"] for i in r["items"]} == {
+        "a.jpg": [f"{HID}-0001-0000", f"{HID}-0002-0000"], "b.jpg": [f"{HID}-0001-0000", f"{HID}-0002-0000"]}
+    c.vault_tag(ws, items=["b.jpg"], remove=[f"{HID}-0002-0000"])
+    assert [i["name"] for i in c.vault_items(ws, f"{HID}-0002-0000")["items"]] == ["a.jpg"]
+    with pytest.raises(cf.ConfigError, match="not in the vault: c.jpg"):
+        c.vault_tag(ws, items=["c.jpg"], add=["0001-0000"])
+    with pytest.raises(cf.ConfigError, match="which tags"):
+        c.vault_tag(ws, items=["a.jpg"])

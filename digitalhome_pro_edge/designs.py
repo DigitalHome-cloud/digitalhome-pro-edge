@@ -73,10 +73,17 @@ DEVICES = {
     # of the board, sealed, not the electrician's; it takes no board modules
     "main_breaker": (DHC.ProtectionDevice, 0),
     "unidentified": (DHP.UnidentifiedDevice, 2),  # seen in a survey, not yet known
+    "bell_transformer": (DHP.BellTransformer, 2),  # a doorbell's transformer (8 V, 12 V)
 }
 PROTECTION_KINDS = ("breaker", "fuse", "main_breaker")
 EDITION = re.compile(r"([a-z][a-z0-9]{1,19})-([0-9]{4})")
 RCD_MODULES = 2
+# the norm a workspace's installation is governed by, chosen by its country;
+# a country not listed gets no norm and no norm checks, only the structure
+INSTALLATION_NORM = {"FR": DHC.Norm_NFC15100, "BE": DHC.Norm_RGIE}
+# appliances whose circuit RGIE wants below a 30 mA RCD (draft, see the
+# header of edge/ontology/cbox/rgie-1981.shapes.ttl)
+WET_APPLIANCES = {"washing_machine", "dryer", "dishwasher"}
 POINT_KINDS = {"socket", "light", "switch", "appliance", "outlet"}
 STATUSES = ("active", "quoted", "done", "archived")
 RESERVE = Decimal("0.20")       # NF C 15-100: about 20 % free space on a board
@@ -181,6 +188,16 @@ def _check_instance(instance: str) -> str:
     if instance and not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", instance):
         raise ValueError("an instance is a connection's name: lowercase letters, digits and -, e.g. stage or prod")
     return instance
+
+
+def _poles(poles: Any, allowed: tuple) -> int:
+    try:
+        n = int(poles)
+    except (TypeError, ValueError):
+        n = 0
+    if n not in allowed:
+        raise ValueError(f"poles is one of {', '.join(map(str, allowed))}")
+    return n
 
 
 def _mint(prefix: str) -> str:
@@ -294,8 +311,9 @@ class Designs:
             g.add((node, DHP.country, Literal(country.upper())))
             if instance:
                 g.add((node, DHP.instance, Literal(instance)))
-            if country.upper() == "FR":
-                g.add((node, DHC.governedBy, DHC.Norm_NFC15100))
+            norm = INSTALLATION_NORM.get(country.upper())
+            if norm is not None:
+                g.add((node, DHC.governedBy, norm))
         self.kb.change(name, apply)
         return {"workspace": name, "title": title, "home": home, "instance": instance}
 
@@ -403,11 +421,14 @@ class Designs:
         return {"id": board}
 
     def add_rcd(self, ws: str, board: str, label: str, rated_current: Optional[float] = 40,
-                sensitivity_ma: float = 30, rcd_type: Optional[str] = "A", to_verify: bool = False) -> Dict:
+                sensitivity_ma: float = 30, rcd_type: Optional[str] = "A", to_verify: bool = False,
+                poles: int = 2) -> Dict:
         """An RCD. to_verify: its rating or type was not read, or a quote does
-        not say; leave them out (None) rather than guess."""
+        not say; leave them out (None) rather than guess. poles: 2, or 4 for
+        a three-phase one; it takes as many modules."""
         if not to_verify and (rated_current is None or not rcd_type):
             raise ValueError("an RCD states its rated current and type, or is marked to verify")
+        poles = _poles(poles, (2, 4))
         ident = _mint("rcd")
 
         def apply(g: Graph) -> None:
@@ -423,7 +444,9 @@ class Designs:
             if to_verify:
                 g.add((n, DHP.toVerify, Literal(True)))
             g.add((n, DHP.onBoard, b))
-            g.add((n, DHP.modules, _int(RCD_MODULES)))
+            g.add((n, DHP.modules, _int(poles)))
+            if poles != RCD_MODULES:
+                g.add((n, DHP.poles, _int(poles)))
         self._change(ws, apply)
         return {"id": ident}
 
@@ -461,11 +484,17 @@ class Designs:
                     circuit_type: Optional[str] = None, rated_current: Optional[float] = None,
                     cross_section: Optional[float] = None, points: int = 0, appliance: str = "",
                     dedicated: Optional[bool] = None, board: Optional[str] = None,
-                    protection: str = "breaker", to_verify: bool = False) -> Dict:
+                    protection: str = "breaker", to_verify: bool = False, poles: int = 1,
+                    modules: Optional[int] = None) -> Dict:
         """A circuit and its own breaker or fuse (1 module), below an RCD, or
         straight on a board that has none (an as-is survey of an old board).
         A survey may leave the type, rating and cross-section unknown: the
-        circuit is then marked to verify, never given a guessed value."""
+        circuit is then marked to verify, never given a guessed value.
+        poles: of its own breaker, 1 to 3; it takes as many modules (on a
+        3 × 230 V supply a single-phase circuit's breaker has 2 poles, a
+        three-phase one 3). modules: the breaker's width when it is not one
+        per pole (a compact 2-pole breaker in 1 module). The circuit's norm
+        is its workspace's."""
         if circuit_type and circuit_type not in CIRCUIT_TYPES:
             raise ValueError(f"circuit_type is one of {', '.join(CIRCUIT_TYPES)}")
         if protection not in ("breaker", "fuse"):
@@ -474,6 +503,10 @@ class Designs:
             raise ValueError("a circuit has a label")
         if not rcd and not board:
             raise ValueError("name the RCD the circuit is below, or the board for one without an RCD")
+        poles = _poles(poles, (1, 2, 3))
+        width = poles if modules is None else int(modules)
+        if not 1 <= width <= poles:
+            raise ValueError("a breaker takes 1 module, up to one per pole")
         unknown = not circuit_type or rated_current is None or cross_section is None
         to_verify = bool(to_verify or unknown)
         ident = _mint("circuit")
@@ -491,19 +524,23 @@ class Designs:
             if rated_current is not None:
                 g.add((brk, DHC.ratedCurrent, _dec(rated_current)))
             g.add((brk, DHP.onBoard, b))
-            g.add((brk, DHP.modules, _int(1)))
+            g.add((brk, DHP.modules, _int(width)))
+            if poles != 1:
+                g.add((brk, DHP.poles, _int(poles)))
             g.add((c, RDF.type, DHC.Circuit))
             g.add((c, RDFS.label, Literal(label)))
             if circuit_type:
                 g.add((c, DHC.hasCircuitType, DHC[CIRCUIT_TYPES[circuit_type]]))
-            g.add((c, DHC.governedBy, DHC.Norm_NFC15100))
+            norm = g.value(self._workspace_node(g), DHC.governedBy)
+            if norm is not None:
+                g.add((c, DHC.governedBy, norm))
             if rated_current is not None:
                 g.add((c, DHC.ratedCurrent, _dec(rated_current)))
             if cross_section is not None:
                 g.add((c, DHC.crossSection, _dec(cross_section)))
             if to_verify:
                 g.add((c, DHP.toVerify, Literal(True)))
-            g.add((c, DHC.phase, _int(1)))
+            g.add((c, DHC.phase, _int(3 if poles == 3 else 1)))
             g.add((c, DHC.dedicated, Literal(bool(dedicated) if dedicated is not None
                                              else bool(circuit_type) and circuit_type not in ("lighting", "socket"))))
             if points:
@@ -515,6 +552,48 @@ class Designs:
                 g.add((c, DHC.hasProtection, r))
         self._change(ws, apply)
         return {"id": ident}
+
+    def position(self, ws: str, item: str, row: Optional[int] = None, slot: Optional[int] = None) -> Dict:
+        """Where an item sits on its board: the row (1 = top) and the module
+        it starts at in that row (1 = left). item: an RCD, a board device, or
+        a circuit (its own breaker or fuse). Without row and slot the
+        position is cleared. It must fit the row and not overlap another
+        placed item; the labels follow the positions."""
+        def apply(g: Graph) -> Dict:
+            n = self._find(g, item)
+            if (n, RDF.type, DHC.Circuit) in g:
+                own = self._breakers(g, n)
+                if not own:
+                    raise ValueError(f"{item} has no breaker or fuse to place")
+                n = own[0]
+            b = g.value(n, DHP.onBoard)
+            if b is None:
+                raise ValueError(f"{item} is on no board")
+            g.remove((n, DHP.row, None))
+            g.remove((n, DHP.slot, None))
+            if row is None and slot is None:
+                return {"id": item, "row": None, "slot": None}
+            r, s = int(row or 0), int(slot or 0)
+            rows, per = int(g.value(b, DHP.rows)), int(g.value(b, DHP.modulesPerRow))
+            width = max(1, int(g.value(n, DHP.modules) or 1))
+            if not 1 <= r <= rows:
+                raise ValueError(f"row is 1 to {rows}")
+            if not (1 <= s and s + width - 1 <= per):
+                raise ValueError(f"{width} module(s) from slot {s} do not fit a row of {per}")
+            for other in g.subjects(DHP.onBoard, b):
+                if other == n or g.value(other, DHP.row) is None or int(g.value(other, DHP.row)) != r:
+                    continue
+                o, ow = int(g.value(other, DHP.slot)), max(1, int(g.value(other, DHP.modules) or 1))
+                if s <= o + ow - 1 and o <= s + width - 1:
+                    raise ValueError(f"row {r}, slot {o}–{o + ow - 1} is taken by “{g.value(other, RDFS.label)}”")
+            g.add((n, DHP.row, _int(r)))
+            g.add((n, DHP.slot, _int(s)))
+            return {"id": item, "row": r, "slot": s}
+        return self._change(ws, apply)
+
+    def _position(self, g: Graph, n: Optional[URIRef]) -> Dict:
+        r = g.value(n, DHP.row) if n is not None else None
+        return {"row": int(r), "slot": int(g.value(n, DHP.slot))} if r is not None else {"row": None, "slot": None}
 
     def move_circuit(self, ws: str, circuit: str, rcd: str, protection: Optional[str] = None) -> Dict:
         """Put a circuit below an RCD; its own breaker or fuse moves to that
@@ -748,6 +827,9 @@ class Designs:
                         "appliance": str(g.value(c, DHP.appliance) or ""),
                         "to_verify": (c, DHP.toVerify, Literal(True)) in g,
                         "protection": self._device_kind(g, own[0]) if own else "",
+                        "modules": sum(int(g.value(x, DHP.modules) or 0) for x in own),
+                        "poles": max((int(g.value(x, DHP.poles) or 1) for x in own), default=1),
+                        **self._position(g, own[0] if own else None),
                         "breakers": [item(x) for x in own],
                         "point_list": [{**item(p), "kind": str(g.value(p, DHP.kind))}
                                        for p in sorted(g.subjects(DHP.onCircuit, c), key=str)]}
@@ -761,7 +843,9 @@ class Designs:
                 rcds.append({**item(r), "rated_current": self._num(g, r, DHC.ratedCurrent),
                              "sensitivity_ma": self._num(g, r, DHC.sensitivityMA),
                              "rcd_type": str(g.value(r, DHC.rcdType) or ""),
-                             "to_verify": (r, DHP.toVerify, Literal(True)) in g, "circuits": circuits})
+                             "to_verify": (r, DHP.toVerify, Literal(True)) in g, "circuits": circuits,
+                             "modules": int(g.value(r, DHP.modules) or RCD_MODULES),
+                             "poles": int(g.value(r, DHP.poles) or RCD_MODULES), **self._position(g, r)})
             devices = []
             for d in sorted(on, key=str):
                 if (d, RDF.type, DHC.RCD) in g:
@@ -772,7 +856,7 @@ class Designs:
                     devices.append({**item(d), "kind": kind, "rated_current": self._num(g, d, DHC.ratedCurrent),
                                     "sensitivity_ma": self._num(g, d, DHC.sensitivityMA),
                                     "to_verify": (d, DHP.toVerify, Literal(True)) in g,
-                                    "modules": int(g.value(d, DHP.modules) or 0)})
+                                    "modules": int(g.value(d, DHP.modules) or 0), **self._position(g, d)})
             boards.append({**item(b), "rows": int(g.value(b, DHP.rows)),
                            "modules_per_row": int(g.value(b, DHP.modulesPerRow)),
                            "modules_used": sum(int(g.value(x, DHP.modules) or 0) for x in on),
@@ -809,7 +893,11 @@ class Designs:
                 "findings": findings}
 
     def _norm_findings(self, g: Graph, lang: str) -> List[Dict]:
-        shapes, tbox = _norm_graphs()
+        """The norm shapes of the workspace's country only: the French and
+        the Belgian files both target every circuit, so applying all of
+        them would hold a Belgian board to French rules."""
+        country = str(g.value(self._workspace_node(g), DHP.country) or "FR")
+        shapes, tbox = _country_shapes(country), _norm_graphs()[1]
         if not len(shapes):
             return []
         from pyshacl import validate as shacl
@@ -861,7 +949,8 @@ class Designs:
             thirty = [r for r in rcds if (self._num(g, r, DHC.sensitivityMA) or 999) <= 30]
             if len(thirty) < 2:
                 add("violation", "rcd-count", None, "rcd_count", n=len(thirty))
-        for r in rcds:
+        french = country in ("FR", "")      # NF C 15-100 rules, not the others'
+        for r in rcds if french else ():
             n = len(set(g.subjects(DHC.hasProtection, r)))
             if n > 8:
                 add("violation", "rcd-circuits", r, "rcd_circuits", n=n)
@@ -870,9 +959,12 @@ class Designs:
             if r is None:
                 add("violation", "circuit-rcd", c, "circuit_rcd")
                 continue
+            if country == "BE" and str(g.value(c, DHP.appliance) or "") in WET_APPLIANCES \
+                    and (self._num(g, r, DHC.sensitivityMA) or 999) > 30:
+                add("violation", "rcd-30-wet", c, "rcd_30_wet", rcd=str(g.value(r, RDFS.label)))
             needs_a = (self._type_key(g, c) in TYPE_A_CIRCUITS
                        or str(g.value(c, DHP.appliance) or "") in TYPE_A_APPLIANCES)
-            if needs_a and str(g.value(r, DHC.rcdType)) == "AC":
+            if french and needs_a and str(g.value(r, DHC.rcdType)) == "AC":
                 add("violation", "rcd-type-a", c, "rcd_type_a", rcd=str(g.value(r, RDFS.label)))
         # A value a survey could not read makes the norm shapes pass silently
         # (SHACL checks what is there): say so, so nothing reads as compliant.
@@ -894,7 +986,7 @@ class Designs:
             used = sum(int(g.value(x, DHP.modules) or 0) for x in g.subjects(DHP.onBoard, b))
             if used > cap:
                 add("violation", "board-full", b, "board_over", used=used, cap=cap)
-            elif cap and Decimal(cap - used) / cap < RESERVE:
+            elif french and cap and Decimal(cap - used) / cap < RESERVE:
                 add("warning", "board-reserve", b, "board_reserve", used=used, cap=cap,
                     free=cap - used, need=int((RESERVE * cap).to_integral_value(rounding="ROUND_CEILING")))
         return out
@@ -939,12 +1031,14 @@ class Designs:
                 if (x, RDF.type, DHC.RCD) in g:
                     rc = self._num(g, x, DHC.ratedCurrent)
                     desc = (f"RCD {f'{rc:g}' if rc is not None else '?'} A {self._num(g, x, DHC.sensitivityMA):g} mA"
-                            f" type {g.value(x, DHC.rcdType) or '?'}")
+                            f" type {g.value(x, DHC.rcdType) or '?'}"
+                            + (f" {g.value(x, DHP.poles)}P" if g.value(x, DHP.poles) is not None else ""))
                     kind = "rcd"
                 else:
                     kind = self._device_kind(g, x)
                     rc = self._num(g, x, DHC.ratedCurrent)
-                    desc = f"{kind.replace('_', ' ')}" + (f" {rc:g} A" if rc is not None else "")
+                    desc = (f"{kind.replace('_', ' ')}" + (f" {rc:g} A" if rc is not None else "")
+                            + (f" {g.value(x, DHP.poles)}P" if g.value(x, DHP.poles) is not None else ""))
                 key = (kind, desc, "", str(g.value(x, DHP.partner) or ""), str(g.value(x, DHP.reference) or ""))
                 lines[key] += 1
                 modules[key] = int(g.value(x, DHP.modules) or 0)
@@ -972,6 +1066,21 @@ def _norm_graphs():
                 graph.parse(p, format="turtle")
         _NORMS["shapes"], _NORMS["tbox"] = shapes, tbox
     return _NORMS["shapes"], _NORMS["tbox"]
+
+
+def _country_shapes(country: str) -> Graph:
+    """The norm shapes whose profile names this country (dhc:normCountry)."""
+    key = "shapes:" + country
+    if key not in _NORMS:
+        from rdflib.namespace import OWL
+        merged = Graph()
+        d = settings.ONTOLOGY / "cbox"
+        for p in sorted(d.glob("*.ttl")) if d.is_dir() else []:
+            one = Graph().parse(p, format="turtle")
+            if any(str(one.value(o, DHC.normCountry)) == country for o in one.subjects(RDF.type, OWL.Ontology)):
+                merged += one
+        _NORMS[key] = merged
+    return _NORMS[key]
 
 
 def _in_lang(literals) -> Dict[str, str]:
@@ -1025,6 +1134,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "rcd_circuits": "{n} circuits on this RCD; NF C 15-100 allows at most 8.",
             "circuit_rcd": "This circuit is not below any RCD.",
             "rcd_type_a": "This circuit needs an RCD of type A (or F, B); “{rcd}” is type AC.",
+            "rcd_30_wet": "RGIE: a washing machine, dryer or dishwasher circuit is below a 30 mA RCD; “{rcd}” is less sensitive.",
             "board_over": "The devices take {used} modules, the board has {cap}.",
             "board_reserve": "{used} of {cap} modules used, {free} free: about 20 % ({need}) should stay free for later circuits.",
             "article_norm": "The article {ref} is {why} in its catalogue, not cleared for this workspace ({where}).",
@@ -1038,6 +1148,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "rcd_circuits": "{n} circuits sur ce différentiel ; la NF C 15-100 en autorise 8 au plus.",
             "circuit_rcd": "Ce circuit n'est protégé par aucun différentiel.",
             "rcd_type_a": "Ce circuit demande un différentiel de type A (ou F, B) ; « {rcd} » est de type AC.",
+            "rcd_30_wet": "RGIE : un circuit de lave-linge, séchoir ou lave-vaisselle est en aval d'un différentiel 30 mA ; « {rcd} » est moins sensible.",
             "board_over": "Les appareils occupent {used} modules, le tableau en a {cap}.",
             "board_reserve": "{used} modules occupés sur {cap}, {free} libres : environ 20 % ({need}) doivent rester libres pour les extensions.",
             "article_norm": "L'article {ref} est, selon son catalogue, {why} ; il n'est pas validé pour ce projet ({where}).",
@@ -1051,6 +1162,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "rcd_circuits": "{n} Stromkreise an diesem FI; die NF C 15-100 erlaubt höchstens 8.",
             "circuit_rcd": "Dieser Stromkreis hängt an keinem FI.",
             "rcd_type_a": "Dieser Stromkreis braucht einen FI Typ A (oder F, B); „{rcd}“ ist Typ AC.",
+            "rcd_30_wet": "AREI/RGIE: Waschmaschine, Trockner und Geschirrspüler liegen hinter einem 30-mA-FI; „{rcd}“ ist weniger empfindlich.",
             "board_over": "Die Geräte belegen {used} Teilungseinheiten, der Verteiler hat {cap}.",
             "board_reserve": "{used} von {cap} Teilungseinheiten belegt, {free} frei: etwa 20 % ({need}) sollten für spätere Stromkreise frei bleiben.",
             "article_norm": "Der Artikel {ref} ist laut Katalog {why}; für dieses Projekt ({where}) ist er nicht freigegeben.",

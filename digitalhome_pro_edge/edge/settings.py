@@ -72,9 +72,9 @@ CHAT_ALLOWED: List[Tuple[str, str]] = [
     ("DELETE", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}"),
     # history (ADR-0009): name a revision, make a baseline, go back to one (as a new revision)
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/revisions/([0-9]{1,5}|latest)/(tag|restore)"),
-    # the home's configurations and vault (ADR-0010): publish and promote only as proposals a person confirms
-    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/configuration/(option|pull|push|publish|promote)"),
-    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/vault/upload"),
+    # the home's configurations and vault (ADR-0010): publish, promote and withdraw only as proposals a person confirms
+    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/configuration/(option|pull|push|publish|promote|withdraw)"),
+    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/vault/(upload|tag)"),
     ("POST", r"/api/partners"),
     ("POST", r"/api/market/(subscribe|sync)"),
     ("POST", r"/api/partners/[a-z][a-z0-9-]{0,39}/article"),
@@ -122,9 +122,12 @@ workspace is a checkout of an option: create_option() based on the live
 version, pull_option() and push_option() to keep it in step. A survey of the
 installation as it is becomes the first live configuration
 (publish_first_live), and a finished, delivered plan becomes the next live
-one (promote_option): both are a person's act, so only propose them. Photos
-and documents go to the home's vault (upload_to_vault, a dry run first),
-grouped under the version or option they show.
+one (promote_option): both are a person's act, so only propose them. An
+option that changes nothing is not promoted (the cloud refuses it); a live
+major promoted unchanged before that can be taken back (withdraw_version,
+also only proposed). Photos and documents go to the home's vault
+(upload_to_vault, a dry run first), tagged with the versions or options they
+show; one item may carry several (tag_vault_items).
 
 Surveying an existing board: write what was read, nothing more. A value not
 read (rating, cable section, what a circuit feeds) is left out, and the
