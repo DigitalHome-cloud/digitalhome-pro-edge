@@ -19,8 +19,15 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DHPRO_EDGE_EDGE_DATA", str(tmp_path / "data"))
     monkeypatch.setattr(version, "UPDATE_CHECK", False)
     monkeypatch.setattr(web, "_designs", None)
+    # linked to a cloud that lists the invented home the tests build in (ADR-0008)
+    from digitalhome_pro_edge import homes as hm
+    from digitalhome_pro_edge.edge import cloud
+    monkeypatch.setattr(cloud, "call", lambda path, body, profile=None:
+                        {"homes": [{"smartHomeId": "demo-house", "label": "Demo house"}]})
+    hm.reset()
     web.app.config["TESTING"] = True
-    return web.app.test_client()
+    yield web.app.test_client()
+    hm.reset()
 
 
 def build(client):
@@ -57,7 +64,7 @@ def test_label_link_opens_the_item():
 
 def test_every_change_the_tools_propose_is_allowed(client):
     w, b, r, c = build(client)
-    paths = [("POST", "/api/workspaces"), ("POST", f"/api/workspaces/{w}"),
+    paths = [("POST", "/api/workspaces"), ("POST", f"/api/workspaces/{w}"), ("POST", f"/api/workspaces/{w}/attach"),
              ("POST", f"/api/workspaces/{w}/circuits"), ("POST", f"/api/workspaces/{w}/boards/{b}"),
              ("POST", f"/api/workspaces/{w}/circuits/{c}/move"),
              ("POST", f"/api/workspaces/{w}/items/{r}/rename"), ("DELETE", f"/api/workspaces/{w}/items/{c}")]
@@ -146,28 +153,38 @@ def test_a_linked_edge_only_starts_workspaces_for_its_cloud_homes(client, monkey
         calls.append(path)
         return {"homes": [{"smartHomeId": "DE-39576-0001", "label": "Main street 1, Town", "linked": True}]}
     monkeypatch.setattr(cloud, "call", call)
-    hm._cache.update(at=0.0, value=None, profile=None)
+    hm.reset()
     got = client.get("/api/cloud-homes").get_json()
     assert got["linked"] and got["homes"][0]["smartHomeId"] == "DE-39576-0001"
     bad = client.post("/api/workspaces", json={"title": "Kitchen", "home": "made-up", "country": "DE"})
     assert bad.status_code == 400 and "Portal" in bad.get_json()["errors"][0]
     ok = client.post("/api/workspaces", json={"title": "Kitchen", "home": "DE-39576-0001", "country": "DE"})
-    assert ok.status_code == 200
+    assert ok.status_code == 200 and ok.get_json()["instance"] == "default"
     assert calls == ["homes"]                      # cached for the page's polling
-    hm._cache.update(at=0.0, value=None, profile=None)
 
 
-def test_an_unlinked_edge_may_start_a_draft(client, monkeypatch):
+def test_an_unlinked_edge_starts_no_workspace(client, monkeypatch):
     from digitalhome_pro_edge import homes as hm
     from digitalhome_pro_edge.edge import cloud
 
     def call(path, body, profile=None):
         raise cloud.NotLinked("not linked")
     monkeypatch.setattr(cloud, "call", call)
-    hm._cache.update(at=0.0, value=None, profile=None)
+    hm.reset()
     assert client.get("/api/cloud-homes").get_json()["linked"] is False
-    assert client.post("/api/workspaces", json={"title": "Draft", "home": "rue-des-lilas"}).status_code == 200
-    hm._cache.update(at=0.0, value=None, profile=None)
+    r = client.post("/api/workspaces", json={"title": "Draft", "home": "rue-des-lilas"})
+    assert r.status_code == 400 and "not linked" in r.get_json()["errors"][0]
+
+
+def test_a_cloud_that_cannot_list_homes_starts_no_workspace(client, monkeypatch):
+    from digitalhome_pro_edge import homes as hm
+    from digitalhome_pro_edge.edge import cloud
+
+    def call(path, body, profile=None):
+        raise cloud.CloudError("down")
+    monkeypatch.setattr(cloud, "call", call)
+    hm.reset()
+    assert client.post("/api/workspaces", json={"title": "K", "home": "demo-house"}).status_code == 400
 
 
 def test_switching_connection_shows_that_clouds_homes(client, monkeypatch):
@@ -177,9 +194,8 @@ def test_switching_connection_shows_that_clouds_homes(client, monkeypatch):
     monkeypatch.setattr(cloud, "active_profile", lambda: current["name"])
     monkeypatch.setattr(cloud, "call", lambda path, body, profile=None:
                         {"homes": [{"smartHomeId": f"{current['name']}-home", "label": current["name"]}]})
-    hm._cache.update(at=0.0, value=None, profile=None)
+    hm.reset()
     assert client.get("/api/cloud-homes").get_json()["homes"][0]["smartHomeId"] == "stage-home"
     current["name"] = "prod"
     got = client.get("/api/cloud-homes").get_json()
     assert got["homes"][0]["smartHomeId"] == "prod-home" and got["connection"] == "prod"
-    hm._cache.update(at=0.0, value=None, profile=None)

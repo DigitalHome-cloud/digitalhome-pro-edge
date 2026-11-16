@@ -10,7 +10,6 @@
   "side.project": "Project",
   "side.projectPh": "e.g. New switchboard",
   "side.home": "Home",
-  "side.draftPh": "local name, e.g. rue-des-lilas",
   "side.country": "Country",
   "side.start": "Start it",
   "side.orChat": "Or ask in the chat: “a T2 flat, electric heating, 4 rooms”.",
@@ -27,7 +26,6 @@
   "status.archived": "archived",
   "status.quoted": "quoted",
   "home.demo": "(demo)",
-  "home.draft": "Draft, not yet a SmartHome…",
   "home.onConnection": "Homes on the “{name}” connection. ",
   "home.noneYet": "You have no home there yet: create it in the Portal.",
   "design.rename": "Rename",
@@ -133,7 +131,13 @@
   "core.restart": "Restart",
   "core.restartTitle": "start the server again on the same port",
   "core.stop": "Stop",
-  "core.stopTitle": "shut the local server down"
+  "core.stopTitle": "shut the local server down",
+  "list.unattached": "not attached to a cloud home",
+  "design.unattached": "This workspace is for “{home}”, which is not a home on a linked connection. Attach it to one of your homes:",
+  "design.attach": "Attach (on {name})",
+  "design.attachLink": "Link this edge to digitalhome.cloud to attach it to one of your homes.",
+  "design.attached": "Attached",
+  "design.idTitle": "the workspace's id: its folder in mydocs/, which never changes"
  },
  "de": {
   "toolbar.labels": "Etiketten",
@@ -146,7 +150,6 @@
   "side.project": "Projekt",
   "side.projectPh": "z. B. Neuer Verteiler",
   "side.home": "Haus",
-  "side.draftPh": "lokaler Name, z. B. rue-des-lilas",
   "side.country": "Land",
   "side.start": "Anlegen",
   "side.orChat": "Oder im Chat fragen: „eine 2-Zimmer-Wohnung, Elektroheizung, 4 Räume“.",
@@ -163,7 +166,6 @@
   "status.archived": "archiviert",
   "status.quoted": "angeboten",
   "home.demo": "(Demo)",
-  "home.draft": "Entwurf, noch kein SmartHome…",
   "home.onConnection": "Häuser der Verbindung „{name}“. ",
   "home.noneYet": "Dort haben Sie noch kein Haus: legen Sie es im Portal an.",
   "design.rename": "Umbenennen",
@@ -269,7 +271,13 @@
   "core.restart": "Neu starten",
   "core.restartTitle": "den Server auf demselben Port neu starten",
   "core.stop": "Beenden",
-  "core.stopTitle": "den lokalen Server beenden"
+  "core.stopTitle": "den lokalen Server beenden",
+  "list.unattached": "keinem Haus in der Cloud zugeordnet",
+  "design.unattached": "Dieser Arbeitsbereich gehört zu „{home}“, das kein Haus einer verbundenen Cloud ist. Ordnen Sie ihn einem Ihrer Häuser zu:",
+  "design.attach": "Zuordnen (auf {name})",
+  "design.attachLink": "Verbinden Sie diesen Edge mit digitalhome.cloud, um ihn einem Ihrer Häuser zuzuordnen.",
+  "design.attached": "Zugeordnet",
+  "design.idTitle": "die Kennung des Arbeitsbereichs: sein Ordner in mydocs/, der sich nie ändert"
  },
  "fr": {
   "toolbar.labels": "Étiquettes",
@@ -282,7 +290,6 @@
   "side.project": "Projet",
   "side.projectPh": "p. ex. Nouveau tableau",
   "side.home": "Logement",
-  "side.draftPh": "nom local, p. ex. rue-des-lilas",
   "side.country": "Pays",
   "side.start": "Créer",
   "side.orChat": "Ou demandez dans le chat : « un T2, chauffage électrique, 4 pièces ».",
@@ -299,7 +306,6 @@
   "status.archived": "archivé",
   "status.quoted": "devis envoyé",
   "home.demo": "(démo)",
-  "home.draft": "Brouillon, pas encore un SmartHome…",
   "home.onConnection": "Logements de la connexion « {name} ». ",
   "home.noneYet": "Vous n'y avez pas encore de logement : créez-le dans le Portail.",
   "design.rename": "Renommer",
@@ -405,7 +411,13 @@
   "core.restart": "Redémarrer",
   "core.restartTitle": "redémarrer le serveur sur le même port",
   "core.stop": "Arrêter",
-  "core.stopTitle": "arrêter le serveur local"
+  "core.stopTitle": "arrêter le serveur local",
+  "list.unattached": "rattaché à aucun logement du cloud",
+  "design.unattached": "Cet espace de travail est pour « {home} », qui n'est pas un logement d'une connexion liée. Rattachez-le à l'un de vos logements :",
+  "design.attach": "Rattacher (sur {name})",
+  "design.attachLink": "Liez ce edge à digitalhome.cloud pour le rattacher à l'un de vos logements.",
+  "design.attached": "Rattaché",
+  "design.idTitle": "l'identifiant de l'espace : son dossier dans mydocs/, qui ne change jamais"
  },
  "edge": {
   "de": {

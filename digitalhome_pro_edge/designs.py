@@ -157,15 +157,22 @@ def migrate_layout(root: Optional[Path] = None) -> List[str]:
     return done
 
 
+def _check_home(home: str) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", home or ""):
+        raise ValueError("a home is its SmartHome ID: letters, digits, - and _")
+
+
+def _check_instance(instance: str) -> str:
+    """A cloud connection's name, as edge/cloud.py names them; "" = none."""
+    instance = (instance or "").strip()
+    if instance and not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", instance):
+        raise ValueError("an instance is a connection's name: lowercase letters, digits and -, e.g. stage or prod")
+    return instance
+
+
 def _mint(prefix: str) -> str:
     alphabet = string.ascii_lowercase + string.digits
     return prefix + "-" + "".join(secrets.choice(alphabet) for _ in range(8))
-
-
-def _slug(text: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
-    s = s if s and s[0].isalpha() else f"w-{s}".rstrip("-")
-    return s[:30].rstrip("-") or "w"
 
 
 def _iri(home: str, kind: str, ident: str) -> URIRef:
@@ -212,30 +219,40 @@ class Designs:
                 "workspace": name,
                 "title": str(g.value(ws, RDFS.label)),
                 "home": str(g.value(ws, DHP.home)),
+                "instance": str(g.value(ws, DHP.instance) or ""),
                 "status": str(g.value(ws, DHP.status)),
                 "country": str(g.value(ws, DHP.country) or ""),
                 "boards": len(set(g.subjects(RDF.type, DHC.DistributionBoard))),
                 "circuits": len(set(g.subjects(RDF.type, DHC.Circuit))),
             })
-        return sorted(out, key=lambda w: (w["home"], w["title"].lower()))
+        return sorted(out, key=lambda w: (w["instance"], w["home"], w["title"].lower()))
 
     def homes(self) -> List[Dict]:
-        by_home: Dict[str, List[Dict]] = defaultdict(list)
+        """Workspaces grouped by the home they belong to, and the instance
+        (the cloud connection: stage, prod …) that home is on. The same
+        SmartHome ID on two instances is two homes. instance "" = not attached
+        to a cloud home yet (ADR-0008)."""
+        by_home: Dict[tuple, List[Dict]] = defaultdict(list)
         for w in self.workspaces():
-            by_home[w["home"]].append(w)
-        return [{"home": h, "workspaces": ws} for h, ws in sorted(by_home.items())]
+            by_home[(w["instance"], w["home"])].append(w)
+        return [{"instance": i, "home": h, "workspaces": ws}
+                for (i, h), ws in sorted(by_home.items(), key=lambda kv: (kv[0][0] == "", kv[0]))]
 
-    def new_workspace(self, title: str, home: str, country: str = "FR") -> Dict:
+    def new_workspace(self, title: str, home: str, country: str = "FR", instance: str = "") -> Dict:
+        """A workspace for one home on one instance. Its id is minted
+        (ws-xxxxxxxx) and never changes; the title can (ADR-0008). Whether the
+        home is one the person may design for on that instance is checked by
+        the caller (homes.check), which knows the cloud."""
         title = (title or "").strip()
         home = (home or "").strip()
         if not title or not home:
             raise ValueError("a workspace needs a title and a home")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", home):
-            raise ValueError("a home is its SmartHome ID or a short local name: letters, digits, - and _")
+        _check_home(home)
+        instance = _check_instance(instance)
         existing = set(self.kb.graphs())
-        name = _slug(title)
-        while name in existing or name in RESERVED:
-            name = f"{_slug(title)[:24]}-{secrets.token_hex(2)}"
+        name = _mint("ws")
+        while name in existing:
+            name = _mint("ws")
         node = _iri(home, "workspace", name)
 
         def apply(g: Graph) -> None:
@@ -244,10 +261,44 @@ class Designs:
             g.add((node, DHP.home, Literal(home)))
             g.add((node, DHP.status, Literal("active")))
             g.add((node, DHP.country, Literal(country.upper())))
+            if instance:
+                g.add((node, DHP.instance, Literal(instance)))
             if country.upper() == "FR":
                 g.add((node, DHC.governedBy, DHC.Norm_NFC15100))
         self.kb.change(name, apply)
-        return {"workspace": name, "title": title, "home": home}
+        return {"workspace": name, "title": title, "home": home, "instance": instance}
+
+    def attach_workspace(self, ws: str, instance: str, home: str) -> Dict:
+        """Give a workspace its home on an instance: one made before ADR-0008
+        (no instance, perhaps a local draft name), or moved to another home.
+        Every IRI of the design names its home (instance/{home}/…), so those
+        are rewritten in the same change; the shapes check the result."""
+        home = (home or "").strip()
+        _check_home(home)
+        instance = _check_instance(instance)
+        if not instance:
+            raise ValueError("attach a workspace to a home on a linked connection (stage, prod …)")
+
+        def apply(g: Graph) -> None:
+            node = self._workspace_node(g)
+            if node is None:
+                raise NotFound("no such workspace")
+            old = f"{INSTANCE}{g.value(node, DHP.home)}/"
+            new = f"{INSTANCE}{home}/"
+            if old != new:
+                move = lambda x: URIRef(new + str(x)[len(old):]) \
+                    if isinstance(x, URIRef) and str(x).startswith(old) else x
+                triples = list(g)
+                for s, p, o in triples:
+                    s2, o2 = move(s), move(o)
+                    if (s2, o2) != (s, o):
+                        g.remove((s, p, o))
+                        g.add((s2, p, o2))
+                node = move(node)
+            g.set((node, DHP.home, Literal(home)))
+            g.set((node, DHP.instance, Literal(instance)))
+        self._change(ws, apply)
+        return {"workspace": ws, "home": home, "instance": instance}
 
     def set_workspace(self, ws: str, title: Optional[str] = None, status: Optional[str] = None) -> Dict:
         if status is not None and status not in STATUSES:
@@ -551,6 +602,7 @@ class Designs:
                   "items": sorted(_local(x) for x in g.subjects(REC.locatedIn, r))}
                  for r in sorted(set(g.subjects(RDF.type, REC.Room)), key=lambda r: str(g.value(r, RDFS.label)))]
         return {"workspace": ws, "title": str(g.value(node, RDFS.label)), "home": str(g.value(node, DHP.home)),
+                "instance": str(g.value(node, DHP.instance) or ""),
                 "status": str(g.value(node, DHP.status)), "country": str(g.value(node, DHP.country) or ""),
                 "boards": boards, "rooms": rooms}
 

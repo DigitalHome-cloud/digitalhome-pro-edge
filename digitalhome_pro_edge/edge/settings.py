@@ -65,7 +65,7 @@ CHAT_ALLOWED: List[Tuple[str, str]] = [
     # designs (app.py): a workspace and everything in its design
     ("POST", r"/api/workspaces"),
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}"),
-    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/(boards|rcds|devices|circuits|rooms|points)"),
+    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/(boards|rcds|devices|circuits|rooms|points|attach)"),
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/boards/[a-z]+-[a-z0-9]{8}"),
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/circuits/circuit-[a-z0-9]{8}/move"),
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}/(place|rename|reference)"),
@@ -85,8 +85,10 @@ and answer in the language the person writes in (the page is in {{lang}}).
 A home has one or more workspaces: active projects such as a new
 switchboard or a kitchen. Homes are made on digitalhome.cloud, not here:
 cloud_homes() lists the person's homes, and a new workspace names one by its
-SmartHome ID. Never invent an ID; if the home is missing, say to create it in
-the Portal. Each holds one design: boards (rows × 18 mm
+SmartHome ID. A workspace belongs to that home on one connection (stage,
+prod …), so the edge must be linked; a workspace listed as not attached gets
+its home with attach_workspace(). Never invent an ID; if the home is missing,
+say to create it in the Portal. Each holds one design: boards (rows × 18 mm
 modules) → RCDs → circuits, each with its own breaker → points in rooms.
 Build it with the tools, one step at a time; ids come back from design().
 

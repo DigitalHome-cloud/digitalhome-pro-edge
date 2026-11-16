@@ -8,35 +8,39 @@ its owners); the edge does not invent one. A linked edge asks the cloud,
 POST /edge/v1/homes, for the homes of the person who linked it, and a new
 workspace must name one of them.
 
-An edge that is not linked yet may still start a draft for a local name, so
-work can begin before the home exists in the cloud; the page and the chat say
-it is a draft. Answers are cached for a minute per connection (stage, prod
-…): the page polls, and switching the current connection shows that cloud's
-homes at once.
+A workspace belongs to one home on one instance (ADR-0008): the connection
+(stage, prod …) it was made on, and a SmartHome ID that connection lists. An
+edge that is not linked cannot start one. Answers are cached for a minute per
+connection: the page polls, and switching the current connection shows that
+cloud's homes at once.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from .edge import cloud
 
 _TTL = 60.0
-_cache: Dict[str, object] = {"at": 0.0, "value": None, "profile": None}
+_cache: Dict[str, Tuple[float, Dict]] = {}       # connection → (when, answer)
 
 
-def cloud_homes(refresh: bool = False) -> Dict:
-    """{linked, homes: [{smartHomeId, label, city, postalCode, country, isDemo, linked}], why}."""
+def reset() -> None:
+    _cache.clear()
+
+
+def cloud_homes(refresh: bool = False, profile: Optional[str] = None) -> Dict:
+    """{linked, homes: [{smartHomeId, label, city, postalCode, country, isDemo, linked}],
+    why, connection, site} for one connection (default: the current one)."""
     now = time.monotonic()
-    profile = cloud.active_profile()
-    if (not refresh and _cache["value"] is not None and _cache["profile"] == profile
-            and now - float(_cache["at"]) < _TTL):
-        return _cache["value"]  # type: ignore[return-value]
+    profile = profile or cloud.active_profile()
+    hit = _cache.get(profile)
+    if not refresh and hit is not None and now - hit[0] < _TTL:
+        return hit[1]
     try:
-        got = cloud.call("homes", {})
+        got = cloud.call("homes", {}, profile=profile)
         value = {"linked": True, "homes": list(got.get("homes") or []), "why": ""}
-        value["connection"] = profile
     except cloud.NotLinked:
         value = {"linked": False, "homes": [],
                  "why": "This edge is not linked to digitalhome.cloud: link it to choose one of your homes."}
@@ -44,21 +48,25 @@ def cloud_homes(refresh: bool = False) -> Dict:
         why = ("The connected cloud does not list homes yet." if getattr(e, "status", 0) == 404
                else f"digitalhome.cloud did not answer: {e}")
         value = {"linked": True, "homes": [], "why": why, "unavailable": True}
-    value.setdefault("connection", profile)
+    value["connection"] = profile
     # the cloud's web site (the Portal), for links to a home: <site>/?home=<SmartHome ID>
     value["site"] = cloud.load_state(profile).get("site") if value["linked"] else None
-    _cache.update(at=now, value=value, profile=profile)
+    _cache[profile] = (now, value)
     return value
 
 
-def check(home: str) -> None:
-    """Refuse a home the linked cloud does not know; allow a draft name only
-    when the edge is not linked (or the cloud cannot list homes yet)."""
-    got = cloud_homes()
-    if not got["linked"] or got.get("unavailable"):
-        return
+def check(home: str, profile: Optional[str] = None) -> str:
+    """The connection a workspace for this home may be made on; refuses when
+    the connection is not linked, cannot list homes, or does not list it."""
+    got = cloud_homes(profile=profile)
+    name = got["connection"]
+    if not got["linked"]:
+        raise ValueError(f"the {name} connection is not linked: link this edge to digitalhome.cloud first")
+    if got.get("unavailable"):
+        raise ValueError(f"cannot check the home on {name}: {got['why']}")
     ids: List[str] = [h.get("smartHomeId", "") for h in got["homes"]]
     if home not in ids:
         known = ", ".join(f"{h.get('smartHomeId')} ({h.get('label')})" for h in got["homes"]) or "none yet"
-        raise ValueError(f"{home} is not one of your homes on digitalhome.cloud ({known}); "
+        raise ValueError(f"{home} is not one of your homes on {name} ({known}); "
                          "create the home in the Portal first")
+    return name

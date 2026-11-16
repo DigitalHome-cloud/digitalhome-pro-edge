@@ -114,15 +114,27 @@ def workspaces():
 
 @app.get("/api/cloud-homes")
 def cloud_homes():
-    return jsonify(hm.cloud_homes(refresh=request.args.get("refresh") == "1"))
+    return jsonify(hm.cloud_homes(refresh=request.args.get("refresh") == "1",
+                                  profile=request.args.get("connection") or None))
 
 
 @app.post("/api/workspaces")
 def new_workspace():
-    def make(title: str = "", home: str = "", country: str = "FR"):
-        hm.check((home or "").strip())
-        return designs().new_workspace(title, home, country)
-    return run(make, **fields("title", "home", "country"))
+    # linked only, for a home the connection lists (ADR-0008)
+    def make(title: str = "", home: str = "", country: str = "FR", connection: str = ""):
+        home = (home or "").strip()
+        name = hm.check(home, connection or None)
+        return designs().new_workspace(title, home, country, instance=name)
+    return run(make, **fields("title", "home", "country", "connection"))
+
+
+@app.post("/api/workspaces/<ws>/attach")
+def attach_workspace(ws: str):
+    def attach(home: str = "", connection: str = ""):
+        home = (home or "").strip()
+        name = hm.check(home, connection or None)
+        return designs().attach_workspace(ws, name, home)
+    return run(attach, **fields("home", "connection"))
 
 
 @app.get("/api/workspaces/<ws>")

@@ -224,25 +224,36 @@ def partner_search(partner: str, query: str, limit: int = 20) -> list:
 # ------------------------------------------------------------- changing ----
 
 @server.tool()
-def new_workspace(title: str, home: str, country: str = "FR") -> dict:
+def new_workspace(title: str, home: str, country: str = "FR", connection: str = "") -> dict:
     """Start a workspace (a project) for a home. The home is a SmartHome ID
-    from cloud_homes(); only an edge not linked yet may use a draft name.
+    from cloud_homes(); the edge must be linked, and the workspace belongs to
+    that home on that connection (stage, prod …; default the current one).
     The country chooses the norm (FR: NF C 15-100)."""
     return act(f"New workspace “{title}” for home {home}", "POST", "/api/workspaces",
-               {"title": title, "home": home, "country": country})
+               _clean(title=title, home=home, country=country, connection=connection))
 
 
 @server.tool()
-def cloud_homes() -> dict:
-    """The person's homes on digitalhome.cloud (SmartHome ID, address label,
-    country), which a new workspace must name. linked=false: the edge is not
-    linked yet, and a workspace can only be a draft for a local name."""
-    return _get("/api/cloud-homes")
+def attach_workspace(workspace: str, home: str, connection: str = "") -> dict:
+    """Give a workspace its home on a connection: one listed as not attached
+    (made before workspaces had an instance, or for a draft name). The
+    design's identifiers are moved to that home."""
+    return act(f"Attach workspace {workspace} to home {home}", "POST", f"{_ws(workspace)}/attach",
+               _clean(home=home, connection=connection))
+
+
+@server.tool()
+def cloud_homes(connection: str = "") -> dict:
+    """The person's homes on digitalhome.cloud for one connection (default the
+    current one): SmartHome ID, address label, country. A new workspace must
+    name one of them. linked=false: link the edge first."""
+    return _get("/api/cloud-homes" + (f"?connection={_q(connection)}" if connection else ""))
 
 
 @server.tool()
 def set_workspace(workspace: str, title: str = "", status: str = "") -> dict:
-    """Rename a workspace, or set its status: active, quoted, done, archived."""
+    """Rename a workspace (its title; the id and folder stay), or set its
+    status: active, quoted, done, archived."""
     return act(f"Update workspace {workspace}", "POST", _ws(workspace), _clean(title=title, status=status))
 
 

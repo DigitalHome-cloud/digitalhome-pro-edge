@@ -48,8 +48,11 @@ inside the package. A save goes back to the folder the note came from.
 
 Inside `mydocs/`, each workspace has its own folder (ADR-0007):
 `mydocs/<workspace>/design.ttl` and `mydocs/<workspace>/files/`, beside the
-shared `inbox/` and `partners/`. A workspace's name can be changed with
-**Rename**; its folder stays. The page is in English, German and French:
+shared `inbox/` and `partners/`. A workspace's id is minted (`ws-…`) and
+names its folder; its name can be changed with **Rename**, and the folder
+stays. A workspace belongs to one home on one linked connection (stage,
+prod …), a home you can access in the Portal (ADR-0008); link the edge
+before starting one. The page is in English, German and French:
 pick the language in the header, English by default.
 
 ## Installing without a clone

@@ -1,6 +1,6 @@
 # ADR-0007: One folder per workspace
 
-**Status:** accepted · **Date:** 2026-11-15 · Amends ADR-0001 (where a design is kept) and ADR-0004 (where a file given to the chat is kept)
+**Status:** accepted · **Date:** 2026-11-15 · Amends ADR-0001 (where a design is kept) and ADR-0004 (where a file given to the chat is kept) · Amended by ADR-0008 (ids are minted, not made from the title)
 
 ## Context
 

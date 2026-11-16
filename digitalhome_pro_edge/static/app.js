@@ -38,11 +38,11 @@ async function select(ws, item) {
 
 // ----------------------------------------------------------- the list ----
 
-// A home of the linked cloud as a link to it in the Portal (the Portal opens a home with ?home=);
-// a draft or a home of another cloud stays plain text.
-function homeLink(id) {
+// A home on the current connection as a link to it in the Portal (the Portal opens a home with
+// ?home=); a home on another connection, or a workspace not attached yet, stays plain text.
+function homeLink(id, instance) {
   const c = S.cloud;
-  if (!c || !c.site || !c.homes.some((h) => h.smartHomeId === id)) return esc(id);
+  if (!c || !c.site || instance !== c.connection || !c.homes.some((h) => h.smartHomeId === id)) return esc(id);
   const label = (c.homes.find((h) => h.smartHomeId === id) || {}).label;
   return `<a href="${esc(c.site.replace(/\/$/, ""))}/?home=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer"
             title="${esc(t("list.openPortal", { name: label || id }))}">${esc(id)} ↗</a>`;
@@ -60,32 +60,37 @@ async function drawList() {
     box.innerHTML = `<p class="note">${esc(t("list.none"))}</p>`;
     return;
   }
-  box.innerHTML = homes.map((h) => `<div class="home">${homeLink(h.home)}</div>` + h.workspaces.map((w) =>
+  box.innerHTML = homes.map((h) => `<div class="home">${h.instance
+      ? `${homeLink(h.home, h.instance)} <small class="instance">${esc(h.instance)}</small>`
+      : `${esc(h.home)} <small class="instance">${esc(t("list.unattached"))}</small>`}</div>` + h.workspaces.map((w) =>
     `<button data-ws="${esc(w.workspace)}" class="${w.workspace === S.ws ? "is-on" : ""}">
        <span>${esc(w.title)}</span><small>${esc(status(w.status))} · ${w.circuits}</small></button>`).join("")).join("");
   box.querySelectorAll("button[data-ws]").forEach((b) => b.onclick = () => select(b.dataset.ws));
 }
 
-// The homes a new workspace may name: the person's homes on digitalhome.cloud.
-// Not linked yet: a draft for a local name, said so.
+// The homes a new workspace may name: the person's homes on the current connection.
+// Not linked: no new workspace (ADR-0008).
 async function drawHomeChoice() {
   let got;
   try { got = await core.api("GET", "/api/cloud-homes"); } catch (_) { return; }
   const key = JSON.stringify(got);
   if (S.seen.homes === key) return;
   S.seen.homes = key;
-  S.cloud = got.linked ? { site: got.site, homes: got.homes } : null;
+  S.cloud = got.linked ? { site: got.site, homes: got.homes, connection: got.connection } : null;
   S.seen.list = S.seen.design = null;           // redraw the home links
   const sel = $("#nw-home"), why = $("#nw-home-why");
-  const draft = !got.linked || got.unavailable;
   sel.innerHTML = got.homes.map((h) =>
-    `<option value="${esc(h.smartHomeId)}">${esc(h.label)}${h.isDemo ? " " + esc(t("home.demo")) : ""}</option>`).join("")
-    + (draft ? `<option value="__draft">${esc(t("home.draft"))}</option>` : "");
+    `<option value="${esc(h.smartHomeId)}">${esc(h.label)}${h.isDemo ? " " + esc(t("home.demo")) : ""}</option>`).join("");
   why.hidden = false;
   why.textContent = (got.linked ? t("home.onConnection", { name: got.connection }) : "")
     + (got.why || (got.homes.length ? "" : t("home.noneYet")));
-  $("#nw-make").disabled = !got.homes.length && !draft;
-  $("#nw-draft").hidden = sel.value !== "__draft";
+  $("#nw-make").disabled = !got.linked || !got.homes.length;
+}
+
+// The homes the open workspace may be attached to, as <option>s.
+function homeOptions() {
+  return ((S.cloud && S.cloud.homes) || []).map((h) =>
+    `<option value="${esc(h.smartHomeId)}">${esc(h.label)}${h.isDemo ? " " + esc(t("home.demo")) : ""}</option>`).join("");
 }
 
 // --------------------------------------------------------- the design ----
@@ -122,13 +127,30 @@ async function drawDesign() {
   const box = $("#tab-design");
   box.innerHTML = `<div class="ws-head"><h2>${esc(d.title)}</h2>
       <button type="button" class="ws-rename" title="${esc(t("design.renameTitle", { id: S.ws }))}">${esc(t("design.rename"))}</button></div>
-    <p class="sub">${homeLink(d.home)} · ${esc(d.country)} · ${esc(status(d.status))}</p>
+    <p class="sub">${homeLink(d.home, d.instance)}${d.instance ? ` <small class="instance">${esc(d.instance)}</small>` : ""}
+      · ${esc(d.country)} · ${esc(status(d.status))} · <small title="${esc(t("design.idTitle"))}">${esc(S.ws)}</small></p>
+    ${d.instance ? "" : `<div class="attach note"><p>${esc(t("design.unattached", { home: d.home }))}</p>
+      ${S.cloud && S.cloud.homes.length
+        ? `<select class="attach-home">${homeOptions()}</select>
+           <button type="button" class="attach-go primary">${esc(t("design.attach", { name: S.cloud.connection }))}</button>`
+        : `<p>${esc(t("design.attachLink"))}</p>`}</div>`}
     ${d.boards.length ? d.boards.map(boardBlock).join("")
       : `<p class="note">${esc(t("design.noBoard"))}</p>`}
     ${d.rooms.length ? `<h3>${esc(t("design.rooms"))}</h3><div class="rooms">${d.rooms.map((r) =>
       `<span>${esc(r.label)}${r.items.length ? " · " + r.items.length : ""}</span>`).join("")}</div>` : ""}`;
   box.querySelectorAll("li[data-item]").forEach((li) => li.onclick = () => select(S.ws, li.dataset.item));
   box.querySelector(".ws-rename").onclick = () => renameForm(box.querySelector(".ws-head"), d.title);
+  const go = box.querySelector(".attach-go");
+  if (go) go.onclick = async () => {
+    const ws = S.ws;
+    try {
+      await core.api("POST", `/api/workspaces/${encodeURIComponent(ws)}/attach`,
+                     { home: box.querySelector(".attach-home").value, connection: S.cloud.connection });
+      core.toast(t("design.attached"));
+      S.seen = {};
+      refresh();
+    } catch (err) { core.toast(failed(err)); }
+  };
 }
 
 // The workspace's display name. Only the title changes: the id, and with it
@@ -491,12 +513,11 @@ function wire() {
     S.seen = {};
     refresh();
   });
-  $("#nw-home").onchange = () => { $("#nw-draft").hidden = $("#nw-home").value !== "__draft"; };
   $("#nw-make").onclick = async () => {
     try {
-      const home = $("#nw-home").value === "__draft" ? $("#nw-draft").value.trim() : $("#nw-home").value;
       const got = await core.api("POST", "/api/workspaces", {
-        title: $("#nw-title").value, home, country: $("#nw-country").value });
+        title: $("#nw-title").value, home: $("#nw-home").value, country: $("#nw-country").value,
+        connection: S.cloud ? S.cloud.connection : "" });
       $("#nw-title").value = "";
       select(got.workspace);
     } catch (err) { core.toast(failed(err)); }
