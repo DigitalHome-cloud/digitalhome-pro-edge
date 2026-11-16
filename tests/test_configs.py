@@ -187,7 +187,7 @@ def test_an_unchanged_promote_is_withdrawn_and_the_baseline_tag_goes(d, fake):
     c.create_option(ws, "Baseline")
     c.promote(ws)                                                        # the fake cloud has no guard
     assert c.link(ws)["basedOn"] == f"{HID}-0002-0000"
-    r = c.withdraw(ws)
+    r = c.withdraw(ws, "0002-0000")                                      # short for this home's
     assert r["id"] == f"{HID}-0001-0000" and r["withdrawn"] == f"{HID}-0002-0000"
     assert c.link(ws)["basedOn"] == f"{HID}-0001-0000"
     tags = {t["name"] for rev in d.revisions(ws) for t in rev["tags"]}

@@ -239,6 +239,9 @@ class Configs:
         vid = version or link["basedOn"]
         if not vid:
             raise ConfigError("say which version to withdraw")
+        home = self.home_id(ws)
+        if not vid.startswith(home):
+            vid = f"{home}-{vid}"                       # "0002-0000" is short for this home's
         r = self._call(ws, "withdraw", {"id": vid})
         if r.get("status") != "ok":
             raise ConfigError(self._why(r))
