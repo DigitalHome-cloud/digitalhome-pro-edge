@@ -295,7 +295,7 @@ def set_board(ws: str, board: str):
 
 @app.post("/api/workspaces/<ws>/rcds")
 def add_rcd(ws: str):
-    return run(designs().add_rcd, ws, **fields("board", "label", "rated_current", "sensitivity_ma", "rcd_type"))
+    return run(designs().add_rcd, ws, **fields("board", "label", "rated_current", "sensitivity_ma", "rcd_type", "to_verify"))
 
 
 @app.post("/api/workspaces/<ws>/devices")
@@ -313,7 +313,7 @@ def add_circuit(ws: str):
 
 @app.post("/api/workspaces/<ws>/circuits/<circuit>/move")
 def move_circuit(ws: str, circuit: str):
-    return run(designs().move_circuit, ws, circuit, **fields("rcd"))
+    return run(designs().move_circuit, ws, circuit, **fields("rcd", "protection"))
 
 
 @app.post("/api/workspaces/<ws>/rooms")

@@ -402,8 +402,12 @@ class Designs:
         self._change(ws, apply)
         return {"id": board}
 
-    def add_rcd(self, ws: str, board: str, label: str, rated_current: float = 40,
-                sensitivity_ma: float = 30, rcd_type: str = "A") -> Dict:
+    def add_rcd(self, ws: str, board: str, label: str, rated_current: Optional[float] = 40,
+                sensitivity_ma: float = 30, rcd_type: Optional[str] = "A", to_verify: bool = False) -> Dict:
+        """An RCD. to_verify: its rating or type was not read, or a quote does
+        not say; leave them out (None) rather than guess."""
+        if not to_verify and (rated_current is None or not rcd_type):
+            raise ValueError("an RCD states its rated current and type, or is marked to verify")
         ident = _mint("rcd")
 
         def apply(g: Graph) -> None:
@@ -411,9 +415,13 @@ class Designs:
             n = _iri(self._home(g), "rcd", ident)
             g.add((n, RDF.type, DHC.RCD))
             g.add((n, RDFS.label, Literal(label)))
-            g.add((n, DHC.ratedCurrent, _dec(rated_current)))
+            if rated_current is not None:
+                g.add((n, DHC.ratedCurrent, _dec(rated_current)))
             g.add((n, DHC.sensitivityMA, _dec(sensitivity_ma)))
-            g.add((n, DHC.rcdType, Literal(rcd_type.upper())))
+            if rcd_type:
+                g.add((n, DHC.rcdType, Literal(rcd_type.upper())))
+            if to_verify:
+                g.add((n, DHP.toVerify, Literal(True)))
             g.add((n, DHP.onBoard, b))
             g.add((n, DHP.modules, _int(RCD_MODULES)))
         self._change(ws, apply)
@@ -508,7 +516,13 @@ class Designs:
         self._change(ws, apply)
         return {"id": ident}
 
-    def move_circuit(self, ws: str, circuit: str, rcd: str) -> Dict:
+    def move_circuit(self, ws: str, circuit: str, rcd: str, protection: Optional[str] = None) -> Dict:
+        """Put a circuit below an RCD; its own breaker or fuse moves to that
+        RCD's board. protection: what that device becomes (a fuse holder
+        replaced by a breaker); its rating stays as it was."""
+        if protection is not None and protection not in ("breaker", "fuse"):
+            raise ValueError("a circuit's own protection is a breaker or a fuse")
+
         def apply(g: Graph) -> None:
             c = self._find(g, circuit, DHC.Circuit)
             r = self._find(g, rcd, DHC.RCD)
@@ -517,6 +531,8 @@ class Designs:
             g.add((c, DHC.hasProtection, r))
             for brk in self._breakers(g, c):
                 g.set((brk, DHP.onBoard, g.value(r, DHP.onBoard)))
+                if protection is not None:
+                    g.set((brk, DHP.protectionKind, Literal(protection)))
         self._change(ws, apply)
         return {"id": circuit}
 
@@ -744,7 +760,8 @@ class Designs:
                 circuits = [circuit(c) for c in sorted(set(g.subjects(DHC.hasProtection, r)), key=by_label)]
                 rcds.append({**item(r), "rated_current": self._num(g, r, DHC.ratedCurrent),
                              "sensitivity_ma": self._num(g, r, DHC.sensitivityMA),
-                             "rcd_type": str(g.value(r, DHC.rcdType)), "circuits": circuits})
+                             "rcd_type": str(g.value(r, DHC.rcdType) or ""),
+                             "to_verify": (r, DHP.toVerify, Literal(True)) in g, "circuits": circuits})
             devices = []
             for d in sorted(on, key=str):
                 if (d, RDF.type, DHC.RCD) in g:
@@ -865,6 +882,11 @@ class Designs:
                                           (DHC.crossSection, "section")) if g.value(n, p) is None]
                 add("unchecked", "to-verify", n, "to_verify",
                     what=", ".join(t["what_" + m] for m in missing) or t["what_values"])
+            elif (n, RDF.type, DHC.RCD) in g:
+                missing = [w for p, w in ((DHC.ratedCurrent, "rcd_rating"), (DHC.rcdType, "rcd_type"))
+                           if g.value(n, p) is None]
+                add("unchecked", "to-verify", n, "to_verify",
+                    what=", ".join(t["what_" + m] for m in missing) or t["what_values"])
             else:
                 add("unchecked", "to-verify", n, "to_identify")
         for b in set(g.subjects(RDF.type, DHC.DistributionBoard)):
@@ -915,7 +937,9 @@ class Designs:
             modules[key] = 0
             for x in g.subjects(DHP.onBoard, b):
                 if (x, RDF.type, DHC.RCD) in g:
-                    desc = f"RCD {self._num(g, x, DHC.ratedCurrent):g} A {self._num(g, x, DHC.sensitivityMA):g} mA type {g.value(x, DHC.rcdType)}"
+                    rc = self._num(g, x, DHC.ratedCurrent)
+                    desc = (f"RCD {f'{rc:g}' if rc is not None else '?'} A {self._num(g, x, DHC.sensitivityMA):g} mA"
+                            f" type {g.value(x, DHC.rcdType) or '?'}")
                     kind = "rcd"
                 else:
                     kind = self._device_kind(g, x)
@@ -1007,7 +1031,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "to_verify": "To verify on site ({what}): until then no rule can be checked for it, so it is not compliant either.",
             "to_identify": "Not identified yet: to verify on site.",
             "what_type": "what it feeds", "what_rating": "protection rating", "what_section": "cable section",
-            "what_values": "its values",
+            "what_values": "its values", "what_rcd_rating": "rated current", "what_rcd_type": "type (AC, A, F)",
         },
         "fr": {
             "rcd_count": "La NF C 15-100 demande au moins deux interrupteurs différentiels 30 mA ; ce projet en a {n}. Avec un seul, un défaut sur n'importe quel circuit coupe toute l'installation.",
@@ -1020,7 +1044,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "to_verify": "À vérifier sur place ({what}) : d'ici là aucune règle ne peut être contrôlée, il n'est donc pas conforme non plus.",
             "to_identify": "Pas encore identifié : à vérifier sur place.",
             "what_type": "ce qu'il alimente", "what_rating": "calibre de la protection", "what_section": "section du câble",
-            "what_values": "ses valeurs",
+            "what_values": "ses valeurs", "what_rcd_rating": "calibre", "what_rcd_type": "type (AC, A, F)",
         },
         "de": {
             "rcd_count": "Die NF C 15-100 verlangt mindestens zwei FI-Schutzschalter 30 mA; dieser Entwurf hat {n}. Mit einem schaltet ein Fehler in irgendeinem Stromkreis das ganze Haus ab.",
@@ -1033,7 +1057,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "to_verify": "Vor Ort zu prüfen ({what}): bis dahin kann keine Regel geprüft werden, konform ist er also auch nicht.",
             "to_identify": "Noch nicht bestimmt: vor Ort zu prüfen.",
             "what_type": "was er versorgt", "what_rating": "Bemessungsstrom der Sicherung", "what_section": "Leitungsquerschnitt",
-            "what_values": "seine Werte",
+            "what_values": "seine Werte", "what_rcd_rating": "Bemessungsstrom", "what_rcd_type": "Typ (AC, A, F)",
         },
     }
     return t.get(lang, t["en"])

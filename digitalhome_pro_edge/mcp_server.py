@@ -276,12 +276,15 @@ def set_board(workspace: str, board: str, rows: int = 0, modules_per_row: int = 
 
 @server.tool()
 def add_rcd(workspace: str, board: str, label: str, rated_current: float = 40,
-            sensitivity_ma: float = 30, rcd_type: str = "A") -> dict:
+            sensitivity_ma: float = 30, rcd_type: str = "A", to_verify: bool = False) -> dict:
     """A residual-current device (2 modules) on a board: rating in A,
-    sensitivity in mA, type AC, A, F or B."""
-    return act(f"Add RCD “{label}” {rated_current:g} A {sensitivity_ma:g} mA type {rcd_type}", "POST",
-               _ws(workspace) + "/rcds", {"board": board, "label": label, "rated_current": rated_current,
-                                          "sensitivity_ma": sensitivity_ma, "rcd_type": rcd_type})
+    sensitivity in mA, type AC, A, F or B. to_verify=True when a survey
+    could not read, or a quote does not state, its rating or type: pass
+    rated_current=0 and rcd_type="" for what is unknown, never a guess."""
+    body = {"board": board, "label": label, "sensitivity_ma": sensitivity_ma, "to_verify": bool(to_verify),
+            "rated_current": rated_current or None, "rcd_type": rcd_type or None}
+    what = f"{rated_current:g} A" if rated_current else "? A"
+    return act(f"Add RCD “{label}” {what} {sensitivity_ma:g} mA type {rcd_type or '?'}", "POST", _ws(workspace) + "/rcds", body)
 
 
 @server.tool()
@@ -323,10 +326,13 @@ def add_circuit(workspace: str, label: str, rcd: str = "", circuit_type: str = "
 
 
 @server.tool()
-def move_circuit(workspace: str, circuit: str, rcd: str) -> dict:
-    """Put a circuit below another RCD."""
-    return act(f"Move circuit {circuit} to RCD {rcd}", "POST",
-               _ws(workspace) + f"/circuits/{_q(circuit)}/move", {"rcd": rcd})
+def move_circuit(workspace: str, circuit: str, rcd: str, protection: str = "") -> dict:
+    """Put a circuit below another RCD (its breaker or fuse moves to that
+    RCD's board). protection="breaker" when a fuse holder is replaced by a
+    breaker, as in a new board; its rating stays as it was."""
+    body = {"rcd": rcd, **({"protection": protection} if protection else {})}
+    return act(f"Move circuit {circuit} to RCD {rcd}" + (f" as a {protection}" if protection else ""), "POST",
+               _ws(workspace) + f"/circuits/{_q(circuit)}/move", body)
 
 
 @server.tool()

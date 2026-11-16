@@ -95,3 +95,29 @@ def test_built_under_names_an_edition_of_the_t_box(d, ws):
         d.set_workspace(ws, built_under="nfc15100-1901")
     with pytest.raises(ValueError, match="looks like"):
         d.set_workspace(ws, built_under="1986")
+
+
+def test_a_quote_that_states_no_rcd_values_is_modelled_to_verify(tmp_path):
+    """A quote says "one 30 mA RCD" and nothing more: the RCD is marked to
+    verify, the report says what is missing, and a surveyed fuse circuit
+    moved below it becomes a breaker with its rating unchanged."""
+    d = dz.Designs(dz.WorkspaceKB(tmp_path))
+    ws = d.new_workspace("Quote", "FR-00000-ABC1-01")["workspace"]
+    old = d.add_board(ws, "Old", rows=1)["id"]
+    c = d.add_circuit(ws, board=old, label="01 · Plaque", circuit_type="cooking", protection="fuse", to_verify=True)["id"]
+    new = d.add_board(ws, "New", rows=1)["id"]
+    with pytest.raises(ValueError):
+        d.add_rcd(ws, new, "ID 30 mA", rated_current=None, rcd_type=None)
+    r = d.add_rcd(ws, new, "ID 30 mA", rated_current=None, rcd_type=None, to_verify=True)["id"]
+    d.move_circuit(ws, c, r, protection="breaker")
+    design = d.design(ws)
+    board = next(b for b in design["boards"] if b["id"] == new)
+    rcd = board["rcds"][0]
+    assert rcd["rated_current"] is None and rcd["rcd_type"] == "" and rcd["to_verify"]
+    assert [x["protection"] for x in rcd["circuits"]] == ["breaker"]
+    report = d.report(ws)
+    unchecked = [f for f in report["findings"] if f["severity"] == "unchecked" and f.get("item") == r]
+    assert unchecked and "rated current" in unchecked[0]["message"] and not report["conforms"]
+    assert any(m["description"] == "RCD ? A 30 mA type ?" for m in d.bom(ws))
+    with pytest.raises(ValueError):
+        d.move_circuit(ws, c, r, protection="main_breaker")

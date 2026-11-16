@@ -116,7 +116,7 @@ function boardBlock(b) {
     <header><b>${esc(b.label)}</b><small>${esc(t("board.modules", { rows: b.rows, per: b.modules_per_row, used: b.modules_used }))}</small></header>
     <div class="meter ${cls}"><i style="width:${pct}%"></i></div>
     ${b.rcds.map((r) => `<div class="rcd"><b>${esc(r.label)}</b>
-        <small> ${esc(t("board.rcd", { a: r.rated_current, ma: r.sensitivity_ma, type: r.rcd_type, n: r.circuits.length }))}</small>
+        <small> ${esc(t("board.rcd", { a: r.rated_current ?? "?", ma: r.sensitivity_ma, type: r.rcd_type || "?", n: r.circuits.length }))}${r.to_verify ? ` · ⚠ ${esc(t("circuit.verify"))}` : ""}</small>
         <ul class="circuits">${r.circuits.map(circuitLine).join("")}</ul></div>`).join("")}
     ${(b.circuits || []).length ? `<div class="rcd no-rcd"><b>${esc(t("board.norcd"))}</b>
         <ul class="circuits">${b.circuits.map(circuitLine).join("")}</ul></div>` : ""}
