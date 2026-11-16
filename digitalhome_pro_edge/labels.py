@@ -154,7 +154,11 @@ def _card(cards: Optional[Dict], item: str) -> str:
 
 
 def qr_svg(data: str) -> str:
-    return segno.make(data, error="m").svg_inline(scale=3, border=1)
+    """The code as SVG that scales to its box: a viewBox and no fixed size
+    (a fixed 117 px code in a 20 mm box was cropped, and no phone read it),
+    with a quiet zone of two modules; the label's white margin adds more."""
+    svg = segno.make(data, error="m").svg_inline(scale=1, border=2, omitsize=True)
+    return svg.replace("<svg ", '<svg shape-rendering="crispEdges" preserveAspectRatio="xMidYMid meet" ', 1)
 
 
 def _short_url(url: str) -> str:

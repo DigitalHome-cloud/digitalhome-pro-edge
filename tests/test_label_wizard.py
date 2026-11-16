@@ -189,3 +189,10 @@ def test_points_get_small_tags_that_open_their_card_and_never_name_the_address(d
         lb.clean_settings({"tag_mm": 40})
     picked = lb.sheet(d.design(ws), CARDS, settings={"kind": "tag", "items": [sw]})
     assert picked.count('class="tag"') == 1
+
+
+def test_a_code_scales_to_its_box_and_is_never_cropped():
+    svg = lb.qr_svg("https://portal.example/id/?h=h-abcdefghjk&i=circuit-abcdefgh")
+    head = svg.split(">", 1)[0]
+    assert 'viewBox="0 0 ' in head                      # scales with the CSS size
+    assert " width=" not in head and " height=" not in head   # a fixed size was cropped to the box
