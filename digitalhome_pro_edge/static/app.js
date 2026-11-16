@@ -648,6 +648,184 @@ async function drawFiles() {
   });
 }
 
+// ------------------------------------------------------------ labels ----
+// A wizard in five steps: what to print, its format, what each label says
+// (text, pictogram, phase), a check by the chat, then the print page. The
+// format is kept per workspace (label-settings.json); what a label says is
+// in the design (set_label, set_phase), so revisions keep it.
+
+const LSTEPS = ["what", "format", "content", "check", "print"];
+const SUPPLIES = { "1N~230V": ["L1"], "3N~400V": ["L1", "L2", "L3", "L1L2L3"], "3~230V": ["L1L2", "L2L3", "L3L1", "L1L2L3"] };
+const phaseText = (p) => (p || "").match(/L\d/g)?.join("-") || "";
+
+async function symbolList() {
+  if (!S.symbols) S.symbols = await core.api("GET", "/api/symbols");
+  return S.symbols;
+}
+
+async function drawLabels() {
+  const box = $("#tab-labels");
+  if (box.contains(document.activeElement) && document.activeElement.matches("input, select")) return;  // typing
+  const wsq = encodeURIComponent(S.ws);
+  const [d, syms] = await Promise.all([core.api("GET", `/api/workspaces/${wsq}/labels`), symbolList()]);
+  const step = S.lstep || "what";
+  const key = JSON.stringify(d) + step + JSON.stringify(S.lplan || null) + (S.lprint || 0);
+  if (S.seen.labels === key) return;
+  S.seen.labels = key;
+  const s = d.settings;
+  const save = async (patch) => {
+    try { await core.api("POST", `/api/workspaces/${wsq}/labels/settings`, patch); } catch (err) { core.toast(failed(err)); }
+    S.seen.labels = null; drawLabels();
+  };
+  const nwarn = d.labels.reduce((n, l) => n + l.warnings.length, 0);
+  const nav = `<ol class="lw-steps">${LSTEPS.map((k, i) => `<li><button data-step="${k}" class="${k === step ? "is-on" : ""}">
+      ${i + 1}. ${esc(t(`lw.${k}`))}${k === "content" && nwarn ? ` <span class="lw-n">${nwarn}</span>` : ""}</button></li>`).join("")}</ol>`;
+  const chk = (name, label) => `<label class="lw-chk"><input type="checkbox" name="${name}" ${s[name] ? "checked" : ""}> ${esc(label)}</label>`;
+  const num = (name, label, min, max, stepv, presets) => `<label class="lw-num">${esc(label)}
+      <input type="number" name="${name}" min="${min}" max="${max}" step="${stepv}" value="${s[name]}">
+      ${(presets || []).map((p) => `<button type="button" class="lw-preset" data-name="${name}" data-v="${p}">${p}</button>`).join("")}</label>`;
+  let body = "";
+  if (step === "what") {
+    body = `<fieldset class="lw-kind"><legend>${esc(t("lw.kindQ"))}</legend>
+        ${["board", "cable", "qr", "tag"].map((k) => `<label class="lw-card ${s.kind === k ? "is-on" : ""}"><input type="radio" name="kind" value="${k}" ${s.kind === k ? "checked" : ""}>
+          <b>${esc(t(`lw.k.${k}`))}</b><small>${esc(t(`lw.k.${k}Hint`))}</small></label>`).join("")}</fieldset>
+      ${d.cards ? `<p class="note">${esc(t("lw.cardsTo", { site: d.cards.site.replace(/^https?:\/\//, "") }))}</p>`
+        : `<div class="finding warning"><b>${esc(t("lw.noCardsTitle"))}</b>${esc(t("lw.noCards"))}</div>`}
+      <fieldset><legend>${esc(t("lw.boards"))}</legend>
+        ${d.boards.map((b) => `<label class="lw-chk"><input type="checkbox" class="lw-board" value="${esc(b.id)}"
+           ${!s.boards.length || s.boards.includes(b.id) ? "checked" : ""}> ${esc(b.label)}</label>`).join("") || `<p class="note">${esc(t("lw.noBoards"))}</p>`}</fieldset>
+      <fieldset><legend>${esc(t("lw.supply"))}</legend>
+        <select class="lw-supply">${d.supply_set || d.supply ? "" : `<option value="">${esc(t("lw.supplyAsk"))}</option>`}
+          ${Object.keys(SUPPLIES).map((k) => `<option value="${k}" ${d.supply === k ? "selected" : ""}>${esc(t(`lw.sup.${k}`))}</option>`).join("")}</select>
+        ${d.supply_set ? "" : `<small class="note">${esc(d.supply ? t("lw.supplyDefault") : t("lw.supplyNone"))}</small>`}</fieldset>`;
+  } else if (step === "format") {
+    body = `<form class="lw-format">
+      <fieldset><legend>${esc(t("lw.k.board"))}</legend>
+        ${num("module_mm", t("lw.module"), 9, 27, 0.5, [17.5, 18])}
+        ${num("strip_h", t("lw.strip"), 10, 60, 1, [12, 15, 20, 30])}</fieldset>
+      <fieldset><legend>${esc(t("lw.k.cable"))}</legend>
+        ${num("cable_h", t("lw.cableH"), 9, 40, 1, [15, 19, 25])}
+        ${num("cable_d", t("lw.cableD"), 0, 40, 0.5, [])}<small class="note">${esc(t("lw.cableDHint"))}</small></fieldset>
+      <fieldset><legend>${esc(t("lw.k.tag"))}</legend>
+        ${num("tag_mm", t("lw.tagSize"), 12, 30, 1, [15, 20, 25])}<small class="note">${esc(t("lw.tagHint"))}</small></fieldset>
+      <fieldset><legend>${esc(t("lw.text"))}</legend>
+        ${num("font_pt", t("lw.font"), 5, 14, 0.5, [6.5, 7.5, 9])}
+        ${chk("show_symbol", t("lw.showSymbol"))}${chk("show_phase", t("lw.showPhase"))}${chk("show_number", t("lw.showNumber"))}</fieldset></form>`;
+  } else if (step === "content") {
+    const phases = SUPPLIES[d.supply] || [];
+    const three = phases.length > 1;
+    const symOpts = (cur) => syms.map((x) => `<option value="${x.id}" ${x.id === cur ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+    const symSvg = (id) => (syms.find((x) => x.id === id) || {}).svg || "";
+    const picked = new Set(s.items);
+    body = `<div class="lw-bar">
+        ${three ? `<button class="lw-balance">${esc(t("lw.balance"))}</button>` : `<span class="note">${esc(t("lw.onePhase"))}</span>`}
+        <span class="note">${esc(t("lw.contentHint"))}</span></div>
+      ${S.lplan ? `<div class="lw-plan"><b>${esc(t("lw.planTitle"))}</b>
+          ${S.lplan.assign.length ? `<ul>${S.lplan.assign.map((a) => `<li>${esc(a.label)} → <b>${esc(phaseText(a.phase))}</b></li>`).join("")}</ul>
+          <p class="note">${esc(t("lw.planLoad", { l: Object.entries(S.lplan.load).map(([k, v]) => `${k} ${v} A`).join(" · ") }))}</p>
+          <button class="primary lw-apply">${esc(t("lw.planApply", { n: S.lplan.assign.length }))}</button>`
+          : `<p class="note">${esc(S.lplan.note || t("lw.planNone"))}</p>`}
+          <button class="lw-plan-x">${esc(t("lw.close"))}</button></div>` : ""}
+      <table class="lw-table"><thead><tr><th>✓</th><th>№</th><th>${esc(t("lw.col.symbol"))}</th><th>${esc(t("lw.col.text"))}</th>
+        <th>${esc(t("lw.col.short"))}</th>${three ? `<th>${esc(t("lw.col.phase"))}</th>` : ""}<th>${esc(t("lw.col.check"))}</th></tr></thead><tbody>
+      ${d.labels.map((l) => `<tr data-item="${esc(l.item)}" class="${l.warnings.length ? "has-warn" : ""}">
+        <td><input type="checkbox" class="lw-pick" ${!picked.size || picked.has(l.item) ? "checked" : ""}></td>
+        <td class="num">${esc(l.number || "—")}<small>${esc(kind(l.kind))}</small></td>
+        <td class="lw-sym"><span class="lw-svg">${symSvg(l.symbol)}</span><select class="lw-symbol">${symOpts(l.symbol)}</select></td>
+        <td><input class="lw-text" value="${esc(l.label_text)}" placeholder="${esc(l.name)}" maxlength="60"></td>
+        <td><input class="lw-short" value="${esc(l.label_short)}" placeholder="${esc(l.derived_short)}" maxlength="20"></td>
+        ${three ? `<td>${["circuit", "rcd"].includes(l.kind) || l.phase_own ? `<select class="lw-phase"><option value="">${esc(l.phase && !l.phase_own ? `(${phaseText(l.phase)})` : "—")}</option>
+            ${phases.map((p) => `<option value="${p}" ${l.phase_own === p ? "selected" : ""}>${esc(phaseText(p))}</option>`).join("")}</select>` : ""}</td>` : ""}
+        <td class="lw-warn">${l.warnings.map((w) => `<div class="w-${esc(w.code)}">${esc(w.text)}</div>`).join("")}</td></tr>`).join("")}
+      </tbody></table>`;
+  } else if (step === "check") {
+    body = `<p>${esc(t("lw.checkIntro"))}</p>
+      <ul class="lw-checks">${["len", "words", "lang", "design", "phase"].map((k) => `<li>${esc(t(`lw.chk.${k}`))}</li>`).join("")}</ul>
+      <p class="note">${esc(t("lw.warnCount", { n: nwarn }))}</p>
+      <button class="primary lw-ask">${esc(t("lw.ask"))}</button>
+      <p class="note">${esc(t("lw.askHint"))}</p>`;
+  } else {
+    const open = d.labels.filter((l) => l.warnings.some((w) => ["too_long", "no_phase", "duplicate"].includes(w.code)));
+    const src = `/workspaces/${wsq}/labels?_=${S.lprint || 0}`;
+    body = `${["qr", "tag"].includes(s.kind) ? `<p class="note">${esc(t("lw.pushNote"))}</p>` : ""}
+      ${open.length ? `<div class="finding warning"><b>${esc(t("lw.stillOpen", { n: open.length }))}</b>
+        ${open.slice(0, 6).map((l) => esc(`${l.number || "—"} ${l.title}: ${l.warnings.map((w) => w.text).join("; ")}`)).join("<br>")}</div>` : ""}
+      <div class="lw-bar"><button class="primary lw-print">${esc(t("lw.printBtn"))}</button>
+        <a class="btn" href="${src}" target="_blank" rel="noopener">${esc(t("lw.openTab"))}</a>
+        <span class="note">${esc(t("lw.printHint"))}</span></div>
+      <iframe class="lw-preview" src="${src}" title="${esc(t("lw.print"))}"></iframe>`;
+  }
+  const i = LSTEPS.indexOf(step);
+  box.innerHTML = `${nav}<div class="lw-body">${body}</div>
+    <div class="lw-foot">${i > 0 ? `<button class="lw-prev">← ${esc(t(`lw.${LSTEPS[i - 1]}`))}</button>` : ""}
+      ${i < LSTEPS.length - 1 ? `<button class="primary lw-next">${esc(t(`lw.${LSTEPS[i + 1]}`))} →</button>` : ""}</div>`;
+
+  const go = (k) => { S.lstep = k; if (k === "print") S.lprint = Date.now(); S.seen.labels = null; drawLabels(); };
+  box.querySelectorAll(".lw-steps button").forEach((b) => b.onclick = () => go(b.dataset.step));
+  const prev = box.querySelector(".lw-prev"); if (prev) prev.onclick = () => go(LSTEPS[i - 1]);
+  const next = box.querySelector(".lw-next"); if (next) next.onclick = () => go(LSTEPS[i + 1]);
+  box.querySelectorAll("input[name=kind]").forEach((r) => r.onchange = () => save({ kind: r.value }));
+  const boardsBox = box.querySelectorAll(".lw-board");
+  boardsBox.forEach((c) => c.onchange = () => {
+    const on = [...boardsBox].filter((x) => x.checked).map((x) => x.value);
+    save({ boards: on.length === boardsBox.length ? [] : on });
+  });
+  const sup = box.querySelector(".lw-supply");
+  if (sup) sup.onchange = async () => {
+    if (!sup.value) return;
+    try { await core.api("POST", `/api/workspaces/${wsq}`, { supply: sup.value }); } catch (err) { core.toast(failed(err)); }
+    S.seen.labels = null; drawLabels();
+  };
+  const fmt = box.querySelector(".lw-format");
+  if (fmt) {
+    fmt.querySelectorAll("input[type=number]").forEach((x) => x.onchange = () => save({ [x.name]: Number(x.value) }));
+    fmt.querySelectorAll("input[type=checkbox]").forEach((x) => x.onchange = () => save({ [x.name]: x.checked }));
+    fmt.querySelectorAll(".lw-preset").forEach((b) => b.onclick = () => save({ [b.dataset.name]: Number(b.dataset.v) }));
+  }
+  const item = (el) => el.closest("tr").dataset.item;
+  const post = async (el, path, data) => {
+    try { await core.api("POST", `/api/workspaces/${wsq}/items/${encodeURIComponent(item(el))}/${path}`, data); }
+    catch (err) { core.toast(failed(err)); }
+    el.blur(); S.seen.labels = null; drawLabels();
+  };
+  box.querySelectorAll(".lw-text").forEach((x) => x.onchange = () => post(x, "label", { text: x.value }));
+  box.querySelectorAll(".lw-short").forEach((x) => x.onchange = () => post(x, "label", { short: x.value }));
+  box.querySelectorAll(".lw-symbol").forEach((x) => x.onchange = () => post(x, "label", { symbol: x.value }));
+  box.querySelectorAll(".lw-phase").forEach((x) => x.onchange = () => post(x, "phase", { phase: x.value }));
+  const picks = box.querySelectorAll(".lw-pick");
+  picks.forEach((c) => c.onchange = () => {
+    const on = [...picks].filter((x) => x.checked).map(item);
+    c.blur();
+    save({ items: on.length === picks.length ? [] : on });
+  });
+  const bal = box.querySelector(".lw-balance");
+  if (bal) bal.onclick = async () => {
+    try { S.lplan = await core.api("GET", `/api/workspaces/${wsq}/phase-plan`); } catch (err) { core.toast(failed(err)); }
+    S.seen.labels = null; drawLabels();
+  };
+  const px = box.querySelector(".lw-plan-x"); if (px) px.onclick = () => { S.lplan = null; S.seen.labels = null; drawLabels(); };
+  const apply = box.querySelector(".lw-apply");
+  if (apply) apply.onclick = async () => {
+    apply.disabled = true;
+    for (const a of S.lplan.assign) {
+      try { await core.api("POST", `/api/workspaces/${wsq}/items/${encodeURIComponent(a.item)}/phase`, { phase: a.phase }); }
+      catch (err) { core.toast(failed(err)); break; }
+    }
+    S.lplan = null; S.seen.labels = null; drawLabels();
+  };
+  const ask = box.querySelector(".lw-ask");
+  if (ask) ask.onclick = () => {
+    const form = document.querySelector("#edge-chat .edge-chat__ask");
+    const input = form && form.querySelector("textarea, input");
+    if (!input) { core.toast(t("lw.noChat")); return; }
+    input.value = t("lw.askText", { ws: S.wsTitle || S.ws });
+    form.requestSubmit();
+    core.toast(t("lw.asked"));
+  };
+  const pr = box.querySelector(".lw-print");
+  if (pr) pr.onclick = () => { const f = box.querySelector(".lw-preview"); if (f && f.contentWindow) f.contentWindow.print(); };
+}
+
 // ------------------------------------------------------------- wiring ----
 
 async function refresh() {
@@ -660,6 +838,7 @@ async function refresh() {
     if (S.tab === "design") await drawDesign();
     if (S.tab === "report") await drawReport();
     if (S.tab === "bom") await drawBom();
+    if (S.tab === "labels") await drawLabels();
     if (S.tab === "history") await drawHistory();
   } catch (err) {
     if (err && err.status === 404 && S.ws) select(null);
@@ -669,6 +848,7 @@ async function refresh() {
 function wire() {
   document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
     S.tab = b.dataset.tab;
+    if (S.tab === "labels") S.lprint = Date.now();      // a fresh preview
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("is-on", x === b));
     document.querySelectorAll(".tab").forEach((t) => t.hidden = t.id !== `tab-${S.tab}`);
     S.seen = {};
@@ -683,7 +863,7 @@ function wire() {
       select(got.workspace);
     } catch (err) { core.toast(failed(err)); }
   };
-  $("#btn-labels").onclick = () => S.ws && window.open(`/workspaces/${encodeURIComponent(S.ws)}/labels`, "_blank");
+  $("#btn-labels").onclick = () => S.ws && document.querySelector('.tabs button[data-tab="labels"]').click();
   wireChatAttach();
   // a language switch redraws what this page drew; i18n.js does the rest
   window.i18n.onChange(() => { S.seen = {}; drawHomeChoice(); refresh(); });

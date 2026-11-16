@@ -47,6 +47,8 @@ SINGLE_VALUED: List[str] = [
     # an article of a partner's / seller's catalogue (market.py, ADR-0006)
     _DHP + "partner", _DHP + "brand", _DHP + "deviceType", _DHP + "category", _DHP + "powerSource",
     _DHP + "voltageV", _DHP + "currentA", _DHP + "powerW", _DHP + "ean", _DHP + "etimClass",
+    # labels and phases (labels.py, the Labels tab)
+    _DHP + "labelText", _DHP + "labelShort", _DHP + "symbol", _DHP + "phaseConductor", _DHP + "supply",
 ]
 # Facts that are single per LANGUAGE (one label per language).
 PER_LANGUAGE: List[str] = [
@@ -68,7 +70,8 @@ CHAT_ALLOWED: List[Tuple[str, str]] = [
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/(boards|rcds|devices|circuits|rooms|points|attach)"),
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/boards/[a-z]+-[a-z0-9]{8}"),
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/circuits/circuit-[a-z0-9]{8}/move"),
-    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}/(place|rename|reference)"),
+    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}/(place|rename|reference|label|phase)"),
+    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/labels/settings"),
     ("DELETE", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/items/[a-z]+-[a-z0-9]{8}"),
     # history (ADR-0009): name a revision, make a baseline, go back to one (as a new revision)
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/revisions/([0-9]{1,5}|latest)/(tag|restore)"),
@@ -136,6 +139,24 @@ holders (protection "fuse") and often no RCD: put such a circuit on the board
 itself. The supplier's sealed main breaker (e.g. 500 mA) is a main_breaker
 device, not an RCD; a device nobody could identify is "unidentified". Record
 the edition the installation was built under only when its date is known.
+
+Labels are printed from the Labels tab, a wizard. Its QR codes open the
+item's ID card in the Portal (only the home's owners see it), so they need
+the workspace attached to its home; small QR tags go inside the covers of
+sockets, switches and devices.
+Before printing the
+person may ask you to check them. Call label_draft(): fix what its warnings
+name, and look for what they cannot see: the same thing worded two ways
+("Steckdosen Küche" / "Küche Stdo."), abbreviations a stranger would not
+read, a language other than the person's, a name that contradicts the
+design (a "Herd" on a 16 A single-phase circuit), room names missing.
+Propose each change with set_label() (the label only; rename() changes the
+design), short enough to fit (the warning says how many characters). Phases
+use the IEC 60445 names L1, L2, L3. The supply system (set_workspace
+supply=) is 1N~230V, 3N~400V, or 3~230V in older Belgian homes, where a
+single-phase circuit is between two phases (L1L2 …). A phase is what was
+read on site; phase_plan() proposes a balanced split for what is not
+known, and you propose its lines only when the person wants it.
 
 Files the person drops on the page are in inbox(); selection() names the one
 just dropped. Read it with read_file() and decide from its content what it is

@@ -13,6 +13,9 @@ from digitalhome_pro_edge.core import version
 from digitalhome_pro_edge.edge import settings
 
 
+CARDS = {"site": "https://portal.example", "home_id": "h-abcdefghjk"}
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DHPRO_EDGE_EDGE_STATE", str(tmp_path / "cloud.json"))
@@ -50,16 +53,16 @@ def test_build_read_and_report_over_http(client):
     assert client.get(f"/api/workspaces/{w}/export.ttl").mimetype == "text/turtle"
 
 
-def test_label_sheet_has_one_qr_per_device(client):
-    w, b, r, c = build(client)
+def test_a_workspace_without_a_home_in_the_cloud_prints_no_codes(client):
+    w, b, r, c = build(client)                                         # never attached to a linked connection
     page = client.get(f"/workspaces/{w}/labels?layout=grid").get_data(as_text=True)
-    assert page.count("<svg") == 2                                     # the RCD and the circuit
+    assert page.count("<svg") == 0 and "No QR codes" in page           # never a link to this edge
     assert "Lights" in page and "window.print()" in page
 
 
-def test_label_link_opens_the_item():
-    assert lb.link("http://192.0.2.10:8773/", "board-swap", "circuit-abcdefgh") == \
-        "http://192.0.2.10:8773/#w=board-swap&i=circuit-abcdefgh"
+def test_a_code_opens_the_items_card_in_the_portal_by_homeid():
+    url = lb.card_url("https://portal.example/", "h-abcdefghjk", "circuit-abcdefgh")
+    assert url == "https://portal.example/id/?h=h-abcdefghjk&i=circuit-abcdefgh"
 
 
 def test_every_change_the_tools_propose_is_allowed(client):
@@ -96,10 +99,10 @@ def big_design():
 
 
 def test_grid_fills_a4_sheets_of_24_and_skips_used_cells():
-    page = lb.sheet(big_design(), "http://127.0.0.1:8773/", layout="grid")
+    page = lb.sheet(big_design(), CARDS, layout="grid")
     assert page.count('class="sheet"') == 2                       # 32 labels → 2 sheets of 24
     assert "size: A4 portrait" in page and page.count("<svg") == 32
-    skipped = lb.sheet(big_design(), "http://127.0.0.1:8773/", layout="grid", skip=20)
+    skipped = lb.sheet(big_design(), CARDS, layout="grid", skip=20)
     assert skipped.count('class="lbl used"') == 20 and skipped.count('class="sheet"') == 3   # 20 + 32 = 52 cells
 
 
@@ -111,7 +114,7 @@ def test_strips_follow_the_board_rows_and_fit_the_sheet():
     modules = sum(c["modules"] for r in rows for c in r["cells"] if not c.get("free"))
     assert modules == 2 + 30 + 1
     assert sum(c["modules"] for r in rows for c in r["cells"]) == 3 * 13      # the rest are blanks
-    page = lb.sheet(big_design(), "http://x/", layout="strip")
+    page = lb.sheet(big_design(), CARDS, layout="strip")
     assert "size: A4 landscape" in page
 
 

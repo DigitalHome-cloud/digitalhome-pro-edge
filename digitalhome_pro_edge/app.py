@@ -160,7 +160,7 @@ def design(ws: str):
 
 @app.post("/api/workspaces/<ws>")
 def set_workspace(ws: str):
-    return run(designs().set_workspace, ws, **fields("title", "status", "built_under"))
+    return run(designs().set_workspace, ws, **fields("title", "status", "built_under", "supply"))
 
 
 @app.get("/api/workspaces/<ws>/report")
@@ -282,19 +282,97 @@ def vault_upload(ws: str):
 
 @app.get("/workspaces/<ws>/labels")
 def labels(ws: str):
+    """The print page: the wizard's saved settings, then what the query says."""
     try:
         d = designs().design(ws)
     except dz.NotFound:
         abort(404)
+    s = lb.load_settings(designs().kb.folder(ws))
+    q = request.args
     try:
-        skip = int(request.args.get("skip", 0))
-        module = float(request.args.get("module", lb.MODULE_MM))
-        height = float(request.args.get("height", lb.STRIP_H))
+        if "skip" in q:
+            s["skip"] = int(q["skip"])
+        if "module" in q:
+            s["module_mm"] = float(q["module"])
+        if "height" in q:
+            s["strip_h"] = float(q["height"])
+        if "layout" in q:
+            s["kind"] = {"strip": "board", "grid": "qr"}.get(q["layout"], q["layout"])
+        s = lb.clean_settings(s)
     except ValueError:
-        abort(400, "skip, module and height are numbers")
-    if not (9 <= module <= 27 and 10 <= height <= 60):
-        abort(400, "module is 9 to 27 mm, height 10 to 60 mm")
-    return lb.sheet(d, request.host_url, request.args.get("layout", "strip"), skip, module, height)
+        abort(400, "skip, module and height are numbers: module 9 to 27 mm, height 10 to 60 mm")
+    resp = app.response_class(lb.sheet(d, _cards(ws), settings=s), mimetype="text/html")
+    # the Labels tab previews this page in a frame: its own origin only (the layer denies framing otherwise)
+    resp.headers["X-Frame-Options"] = "SAMEORIGIN"
+    resp.headers["Content-Security-Policy"] = "frame-ancestors 'self'; base-uri 'none'; object-src 'none'"
+    return resp
+
+
+def _cards(ws: str) -> Optional[dict]:
+    """Where the QR codes point: the Portal of the workspace's connection and
+    the home's homeId, or None while the workspace has no home in the cloud."""
+    try:
+        link = configs().link(ws)
+        site = cloud.load_state(link["instance"]).get("site") if link["instance"] else None
+        home_id = link["homeId"] or (configs().home_id(ws) if site else "")
+    except Exception:                       # not attached, not linked, the cloud not reachable
+        return None
+    return {"site": site, "home_id": home_id} if site and home_id else None
+
+
+def _label_draft(ws: str) -> dict:
+    d = designs().design(ws)
+    s = lb.load_settings(designs().kb.folder(ws))
+    cards = _cards(ws)
+    return {"workspace": ws, "supply": d["supply"], "supply_set": d["supply_set"], "settings": s,
+            "cards": cards, "boards": [{"id": b["id"], "label": b["label"], "tag": b.get("label_short", "")}
+                                       for b in d["boards"]],
+            "labels": lb.warnings(d, s, cards), "cables": lb.cable_labels(d, s)}
+
+
+@app.get("/api/workspaces/<ws>/labels")
+def label_draft(ws: str):
+    return run(_label_draft, ws)
+
+
+@app.get("/api/workspaces/<ws>/labels/settings")
+def get_label_settings(ws: str):
+    return run(lambda: (designs().design(ws), lb.load_settings(designs().kb.folder(ws)))[1])
+
+
+@app.post("/api/workspaces/<ws>/labels/settings")
+def set_label_settings(ws: str):
+    return run(lambda: (designs().design(ws), lb.save_settings(designs().kb.folder(ws), body()))[1])
+
+
+@app.post("/api/workspaces/<ws>/items/<item>/label")
+def set_label(ws: str, item: str):
+    return run(designs().set_label, ws, item, **fields("text", "short", "symbol"))
+
+
+@app.post("/api/workspaces/<ws>/items/<item>/phase")
+def set_phase(ws: str, item: str):
+    return run(designs().set_phase, ws, item, **fields("phase"))
+
+
+@app.get("/api/workspaces/<ws>/phase-plan")
+def phase_plan(ws: str):
+    return run(designs().phase_plan, ws)
+
+
+@app.get("/api/symbols")
+def symbol_list():
+    from . import symbols
+    return jsonify([{**x, "svg": symbols.svg(x["id"])} for x in symbols.ALL])
+
+
+@app.get("/symbols/<ident>.svg")
+def symbol_svg(ident: str):
+    from . import symbols
+    if ident not in symbols.IDS:
+        abort(404)
+    return app.response_class(symbols.svg(ident).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ', 1),
+                              mimetype="image/svg+xml")
 
 
 @app.post("/api/workspaces/<ws>/boards")

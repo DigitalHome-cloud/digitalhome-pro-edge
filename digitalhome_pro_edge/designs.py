@@ -87,6 +87,16 @@ WET_APPLIANCES = {"washing_machine", "dryer", "dishwasher"}
 POINT_KINDS = {"socket", "light", "switch", "appliance", "outlet"}
 STATUSES = ("active", "quoted", "done", "archived")
 RESERVE = Decimal("0.20")       # NF C 15-100: about 20 % free space on a board
+# The supply system, and the phases (IEC 60445 names) an item may be on:
+#   1N~230V  single phase with neutral: everything on L1
+#   3N~400V  three phase with neutral (FR, DE): a single-phase circuit on one phase
+#   3~230V   three phase without neutral (older Belgian networks): a
+#            single-phase circuit between two phases
+SUPPLIES = {"1N~230V": ("L1",), "3N~400V": ("L1", "L2", "L3", "L1L2L3"),
+            "3~230V": ("L1L2", "L2L3", "L3L1", "L1L2L3")}
+DEFAULT_SUPPLY = {"FR": "1N~230V", "DE": "3N~400V"}   # BE: either, so asked for
+ALL_PHASES = "L1L2L3"
+PHASE_BALANCE = 1.5             # one phase above 1.5 × another is worth a look
 
 
 class NotFound(LookupError):
@@ -360,11 +370,14 @@ class Designs:
         return iri
 
     def set_workspace(self, ws: str, title: Optional[str] = None, status: Optional[str] = None,
-                      built_under: Optional[str] = None) -> Dict:
-        """Rename a workspace, set its status, or record the norm edition its
-        installation was built under (dhc:builtUnder: evidence, not a verdict)."""
+                      built_under: Optional[str] = None, supply: Optional[str] = None) -> Dict:
+        """Rename a workspace, set its status, record the norm edition its
+        installation was built under (dhc:builtUnder: evidence, not a verdict),
+        or its supply system (1N~230V, 3N~400V, 3~230V; "" back to the country's)."""
         if status is not None and status not in STATUSES:
             raise ValueError(f"status is one of {', '.join(STATUSES)}")
+        if supply and supply not in SUPPLIES:
+            raise ValueError(f"supply is one of {', '.join(SUPPLIES)}")
         edition = self._edition(built_under) if built_under else None
 
         def apply(g: Graph) -> None:
@@ -377,8 +390,18 @@ class Designs:
                 g.set((node, DHP.status, Literal(status)))
             if edition is not None:
                 g.set((node, DHC.builtUnder, edition))
+            if supply is not None:
+                g.remove((node, DHP.supply, None))
+                if supply:
+                    g.add((node, DHP.supply, Literal(supply)))
         self._change(ws, apply)
         return {"workspace": ws}
+
+    def _supply(self, g: Graph) -> str:
+        """The workspace's supply system: its own, else its country's, else ""."""
+        node = self._workspace_node(g)
+        own = g.value(node, DHP.supply)
+        return str(own) if own is not None else DEFAULT_SUPPLY.get(str(g.value(node, DHP.country) or ""), "")
 
     # ---------------------------------------------------------------- design
 
@@ -673,6 +696,109 @@ class Designs:
         self._change(ws, apply)
         return {"id": item}
 
+    def set_label(self, ws: str, item: str, text: Optional[str] = None, short: Optional[str] = None,
+                  symbol: Optional[str] = None) -> Dict:
+        """What the item's label says, when it should not say what the design
+        does: its text (the name), its short line (the rating) and its
+        pictogram (symbols.py). None leaves one as it is, "" goes back to the
+        design's."""
+        from . import symbols
+        if symbol and symbol not in symbols.IDS:
+            raise ValueError(f"symbol is one of {', '.join(sorted(symbols.IDS))}")
+        for v, most in ((text, 60), (short, 20)):
+            if v is not None and len(v.strip()) > most:
+                raise ValueError(f"a label text is at most 60 characters, its short line 20")
+
+        def apply(g: Graph) -> None:
+            n = self._find(g, item)
+            for v, p in ((text, DHP.labelText), (short, DHP.labelShort), (symbol, DHP.symbol)):
+                if v is None:
+                    continue
+                g.remove((n, p, None))
+                if v.strip():
+                    g.add((n, p, Literal(v.strip())))
+        self._change(ws, apply)
+        return {"id": item}
+
+    def _phase_rule(self, g: Graph, n: URIRef, phase: str, supply: str) -> None:
+        if phase not in SUPPLIES[supply]:
+            raise ValueError(f"on a {supply} supply the phase is one of {', '.join(SUPPLIES[supply])}")
+        if (n, RDF.type, DHC.Circuit) in g:
+            three = int(g.value(n, DHC.phase) or 1) == 3
+        else:
+            three = int(g.value(n, DHP.poles) or 0) == 4
+        if three and phase != ALL_PHASES:
+            raise ValueError("a three-phase item is on L1L2L3")
+        if not three and phase == ALL_PHASES:
+            raise ValueError("a single-phase item is on one phase" + (" pair" if supply == "3~230V" else ""))
+
+    def set_phase(self, ws: str, item: str, phase: str = "") -> Dict:
+        """The phase a circuit, RCD or device is connected to (dhp:phaseConductor):
+        L1, L2, L3 or L1L2L3 on 3N~400V; L1L2, L2L3, L3L1 or L1L2L3 on 3~230V.
+        "" clears it. A circuit with no phase of its own is on its RCD's."""
+        phase = (phase or "").strip().upper().replace("-", "").replace(" ", "")
+
+        def apply(g: Graph) -> None:
+            n = self._find(g, item, DHC.Circuit, DHC.RCD, DHC.ProtectionDevice, DHC.Contactor,
+                           DHC.SurgeProtector, DHP.UnidentifiedDevice, DHP.BellTransformer)
+            supply = self._supply(g)
+            if phase:
+                if not supply:
+                    raise ValueError("set the workspace's supply system first (1N~230V, 3N~400V or 3~230V)")
+                self._phase_rule(g, n, phase, supply)
+            g.remove((n, DHP.phaseConductor, None))
+            if phase:
+                g.add((n, DHP.phaseConductor, Literal(phase)))
+        self._change(ws, apply)
+        return {"id": item, "phase": phase}
+
+    def phase_plan(self, ws: str) -> Dict:
+        """A balanced split of the circuits over the phases, as a suggestion:
+        what is set stays, the rest is spread by rated current, largest first.
+        The circuits below a 2-pole RCD go together (an RCD sits on one
+        phase), with the RCD; a three-phase circuit is on all three. Changes
+        nothing: each line is a set_phase() to propose."""
+        d = self.design(ws)
+        supply = d["supply"]
+        if supply not in ("3N~400V", "3~230V"):
+            return {"supply": supply, "assign": [], "load": {},
+                    "note": "single phase: nothing to split" if supply else "the supply system is not set"}
+        options = [p for p in SUPPLIES[supply] if p != ALL_PHASES]
+        load = {"L1": 0.0, "L2": 0.0, "L3": 0.0}
+
+        def on(phase: str) -> List[str]:
+            return ["L1", "L2", "L3"] if phase == ALL_PHASES else [phase[i:i + 2] for i in range(0, len(phase), 2)]
+
+        def amps(c: Dict) -> float:
+            return float(c["rated_current"] if c["rated_current"] is not None else 16)
+
+        groups = []                          # (items to set, amps per phase, fixed phase or None)
+        for b in d["boards"]:
+            for r in b["rcds"]:
+                cs = r["circuits"]
+                if r.get("poles", 2) == 2:
+                    fixed = r.get("phase_conductor") or next((c["phase_conductor"] for c in cs if c.get("phase_conductor")), None)
+                    todo = ([r] if not r.get("phase_conductor") else []) + [c for c in cs if not c.get("phase_conductor")]
+                    groups.append((todo, sum(amps(c) for c in cs), fixed))
+                else:
+                    if not r.get("phase_conductor"):      # a 4-pole RCD is on all three
+                        groups.append(([r], 0.0, ALL_PHASES))
+                    for c in cs:
+                        groups.append(([] if c.get("phase_conductor") else [c], amps(c),
+                                       c.get("phase") or (ALL_PHASES if c.get("three_phase") else None)))
+            for c in b.get("circuits", []):
+                groups.append(([] if c.get("phase_conductor") else [c], amps(c),
+                               c.get("phase_conductor") or (ALL_PHASES if c.get("three_phase") else None)))
+        assign = []
+        for todo, a, fixed in sorted(groups, key=lambda x: (x[2] is None, -x[1])):
+            if fixed is None:
+                fixed = min(options, key=lambda p: (sum(load[x] for x in on(p)), options.index(p)))
+            for x in on(fixed):
+                load[x] += a
+            for it in todo:
+                assign.append({"item": it["id"], "label": it["label"], "phase": fixed})
+        return {"supply": supply, "assign": assign, "load": {k: round(v, 1) for k, v in load.items()}}
+
     def remove(self, ws: str, item: str) -> Dict:
         """An item, and what cannot exist without it: a circuit takes its
         breaker and points; an RCD or board refuses while circuits hang on it."""
@@ -811,6 +937,11 @@ class Designs:
             room = g.value(n, REC.locatedIn)
             if room is not None:
                 d["room"] = _local(room)
+            for p, k in ((DHP.labelText, "label_text"), (DHP.labelShort, "label_short"),
+                         (DHP.symbol, "symbol"), (DHP.phaseConductor, "phase_conductor")):
+                v = g.value(n, p)
+                if v is not None:
+                    d[k] = str(v)
             return d
 
         boards = []
@@ -829,6 +960,7 @@ class Designs:
                         "protection": self._device_kind(g, own[0]) if own else "",
                         "modules": sum(int(g.value(x, DHP.modules) or 0) for x in own),
                         "poles": max((int(g.value(x, DHP.poles) or 1) for x in own), default=1),
+                        "three_phase": int(g.value(c, DHC.phase) or 1) == 3,
                         **self._position(g, own[0] if own else None),
                         "breakers": [item(x) for x in own],
                         "point_list": [{**item(p), "kind": str(g.value(p, DHP.kind))}
@@ -840,6 +972,9 @@ class Designs:
                             if (c, RDF.type, DHC.Circuit) in g and self._rcd(g, c) is None}, key=by_label)
             for r in sorted((x for x in on if (x, RDF.type, DHC.RCD) in g), key=str):
                 circuits = [circuit(c) for c in sorted(set(g.subjects(DHC.hasProtection, r)), key=by_label)]
+                rp = g.value(r, DHP.phaseConductor)
+                for c in circuits:          # on its RCD's phase, unless it has its own
+                    c["phase"] = c.get("phase_conductor") or (str(rp) if rp is not None else "")
                 rcds.append({**item(r), "rated_current": self._num(g, r, DHC.ratedCurrent),
                              "sensitivity_ma": self._num(g, r, DHC.sensitivityMA),
                              "rcd_type": str(g.value(r, DHC.rcdType) or ""),
@@ -861,7 +996,8 @@ class Designs:
                            "modules_per_row": int(g.value(b, DHP.modulesPerRow)),
                            "modules_used": sum(int(g.value(x, DHP.modules) or 0) for x in on),
                            "built_under": str(g.value(b, DHC.builtUnder) or "").rsplit("#", 1)[-1],
-                           "rcds": rcds, "circuits": [circuit(c) for c in loose], "devices": devices})
+                           "rcds": rcds, "circuits": [{**x, "phase": x.get("phase_conductor", "")}
+                                                      for x in (circuit(c) for c in loose)], "devices": devices})
         rooms = [{**item(r), "level": str(g.value(r, DHP.level) or ""),
                   "items": sorted(_local(x) for x in g.subjects(REC.locatedIn, r))}
                  for r in sorted(set(g.subjects(RDF.type, REC.Room)), key=lambda r: str(g.value(r, RDFS.label)))]
@@ -869,6 +1005,7 @@ class Designs:
                 "instance": str(g.value(node, DHP.instance) or ""),
                 "status": str(g.value(node, DHP.status)), "country": str(g.value(node, DHP.country) or ""),
                 "built_under": str(g.value(node, DHC.builtUnder) or "").rsplit("#", 1)[-1],
+                "supply": self._supply(g), "supply_set": g.value(node, DHP.supply) is not None,
                 "boards": boards, "rooms": rooms}
 
     def export(self, ws: str) -> str:
@@ -888,9 +1025,42 @@ class Designs:
         g = self.kb.load(ws)
         if self._workspace_node(g) is None:
             raise NotFound(f"no workspace {ws}")
-        findings = self._norm_findings(g, lang) + self._board_findings(g, lang) + self._article_findings(g, lang)
+        phases = self.phase_loads(ws)
+        findings = (self._norm_findings(g, lang) + self._board_findings(g, lang) + self._article_findings(g, lang)
+                    + self._phase_findings(phases, lang))
         return {"workspace": ws, "conforms": not any(f["severity"] in ("violation", "unchecked") for f in findings),
-                "findings": findings}
+                "findings": findings, "phases": phases}
+
+    def phase_loads(self, ws: str) -> Dict:
+        """The sum of the breaker ratings on each phase (a three-phase circuit
+        counts on all three), and the circuits whose phase is not known.
+        Ratings, not loads: a first look at the balance, not a calculation."""
+        d = self.design(ws)
+        supply = d["supply"]
+        load = {"L1": 0.0, "L2": 0.0, "L3": 0.0}
+        unknown = []
+        if supply not in ("3N~400V", "3~230V"):
+            return {"supply": supply, "load": {}, "unknown": []}
+        for b in d["boards"]:
+            for c in [c for r in b["rcds"] for c in r["circuits"]] + b.get("circuits", []):
+                ph = c.get("phase") or c.get("phase_conductor") or ""
+                if not ph:
+                    unknown.append(c["id"])
+                    continue
+                for x in (["L1", "L2", "L3"] if ph == ALL_PHASES else [ph[i:i + 2] for i in range(0, len(ph), 2)]):
+                    load[x] += float(c["rated_current"] or 0)
+        return {"supply": supply, "load": {k: round(v, 1) for k, v in load.items()}, "unknown": unknown}
+
+    def _phase_findings(self, phases: Dict, lang: str) -> List[Dict]:
+        load = phases.get("load") or {}
+        if not load or phases.get("unknown") or not any(load.values()):
+            return []
+        hi, lo = max(load, key=load.get), min(load, key=load.get)
+        if load[lo] and load[hi] / load[lo] <= PHASE_BALANCE:
+            return []
+        t = _texts(lang)
+        return [{"severity": "warning", "rule": "phase-balance", "item": "", "label": "",
+                 "message": t["phase_balance"].format(hi=hi, a=f"{load[hi]:g}", lo=lo, b=f"{load[lo]:g}")}]
 
     def _norm_findings(self, g: Graph, lang: str) -> List[Dict]:
         """The norm shapes of the workspace's country only: the French and
@@ -1142,6 +1312,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "to_identify": "Not identified yet: to verify on site.",
             "what_type": "what it feeds", "what_rating": "protection rating", "what_section": "cable section",
             "what_values": "its values", "what_rcd_rating": "rated current", "what_rcd_type": "type (AC, A, F)",
+            "phase_balance": "The phases are unevenly loaded: {hi} carries {a} A of breaker ratings, {lo} {b} A. Moving circuits between phases spreads the load.",
         },
         "fr": {
             "rcd_count": "La NF C 15-100 demande au moins deux interrupteurs différentiels 30 mA ; ce projet en a {n}. Avec un seul, un défaut sur n'importe quel circuit coupe toute l'installation.",
@@ -1156,6 +1327,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "to_identify": "Pas encore identifié : à vérifier sur place.",
             "what_type": "ce qu'il alimente", "what_rating": "calibre de la protection", "what_section": "section du câble",
             "what_values": "ses valeurs", "what_rcd_rating": "calibre", "what_rcd_type": "type (AC, A, F)",
+            "phase_balance": "Les phases sont déséquilibrées : {hi} porte {a} A de calibres, {lo} {b} A. Déplacer des circuits d'une phase à l'autre répartit la charge.",
         },
         "de": {
             "rcd_count": "Die NF C 15-100 verlangt mindestens zwei FI-Schutzschalter 30 mA; dieser Entwurf hat {n}. Mit einem schaltet ein Fehler in irgendeinem Stromkreis das ganze Haus ab.",
@@ -1170,6 +1342,7 @@ def _texts(lang: str) -> Dict[str, str]:
             "to_identify": "Noch nicht bestimmt: vor Ort zu prüfen.",
             "what_type": "was er versorgt", "what_rating": "Bemessungsstrom der Sicherung", "what_section": "Leitungsquerschnitt",
             "what_values": "seine Werte", "what_rcd_rating": "Bemessungsstrom", "what_rcd_type": "Typ (AC, A, F)",
+            "phase_balance": "Die Außenleiter sind ungleich belastet: {hi} trägt {a} A Bemessungsströme, {lo} {b} A. Stromkreise auf andere Außenleiter zu legen verteilt die Last.",
         },
     }
     return t.get(lang, t["en"])

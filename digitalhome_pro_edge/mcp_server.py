@@ -252,13 +252,16 @@ def cloud_homes(connection: str = "") -> dict:
 
 
 @server.tool()
-def set_workspace(workspace: str, title: str = "", status: str = "", built_under: str = "") -> dict:
+def set_workspace(workspace: str, title: str = "", status: str = "", built_under: str = "",
+                  supply: str = "") -> dict:
     """Rename a workspace (its title; the id and folder stay), set its
-    status (active, quoted, done, archived), or record the norm edition the
+    status (active, quoted, done, archived), record the norm edition the
     existing installation was built under, e.g. nfc15100-1977 (evidence for
-    the report, not a verdict; only when the date of the work is known)."""
-    return act(f"Update workspace {workspace}", "POST", _ws(workspace),
-               _clean(title=title, status=status, built_under=built_under))
+    the report, not a verdict; only when the date of the work is known), or
+    its supply system: 1N~230V (single phase), 3N~400V (three phase with
+    neutral), 3~230V (three phase without neutral, older Belgian homes)."""
+    return act(f"Update workspace {workspace}" + (f": supply {supply}" if supply else ""), "POST", _ws(workspace),
+               _clean(title=title, status=status, built_under=built_under, supply=supply))
 
 
 @server.tool()
@@ -296,6 +299,54 @@ def set_position(workspace: str, item: str, row: int = 0, slot: int = 0) -> dict
     body = {"item": item, "row": row, "slot": slot} if row else {"item": item}
     return act(f"Place {item}" + (f" at row {row}, slot {slot}" if row else " nowhere"), "POST",
                _ws(workspace) + "/position", body)
+
+
+@server.tool()
+def label_draft(workspace: str) -> dict:
+    """The labels as they would print, with what to look at first: per label
+    its text, short line, pictogram, phase, module numbers and warnings
+    (too_long, no_rating, to_verify, no_phase, duplicate, position); the
+    cable labels (id, cable, length); the wizard's print settings."""
+    return _get(_ws(workspace) + "/labels")
+
+
+@server.tool()
+def set_label(workspace: str, item: str, text: Optional[str] = None, short: Optional[str] = None,
+              symbol: Optional[str] = None) -> dict:
+    """What an item's label says instead of the design's: text (the name, at
+    most 60 characters), short (the rating line, at most 20), symbol (a
+    pictogram id from symbols()). Leave one out to keep it; "" goes back to
+    the design's. The design's own label (rename) stays as it is."""
+    body = {k: v for k, v in (("text", text), ("short", short), ("symbol", symbol)) if v is not None}
+    what = ", ".join(f"{k} “{v}”" if v else f"{k} back to the design's" for k, v in body.items())
+    return act(f"Label of {item}: {what}", "POST", _ws(workspace) + f"/items/{_q(item)}/label", body)
+
+
+@server.tool()
+def symbols() -> list:
+    """The pictograms a label can carry: id and name."""
+    from . import symbols as sy
+    return sy.ALL
+
+
+@server.tool()
+def set_phase(workspace: str, item: str, phase: str = "") -> dict:
+    """The phase a circuit, RCD or device is connected to (IEC 60445 names):
+    L1, L2, L3 or L1L2L3 on 3N~400V; L1L2, L2L3, L3L1 or L1L2L3 on 3~230V. A
+    circuit below a 2-pole RCD is on the RCD's phase unless it has its own.
+    "" clears it. Only what was read on site, or a phase_plan() line the
+    person agrees with; never a guess presented as read."""
+    return act(f"Put {item} on {phase or 'no phase'}", "POST", _ws(workspace) + f"/items/{_q(item)}/phase",
+               {"phase": phase})
+
+
+@server.tool()
+def phase_plan(workspace: str) -> dict:
+    """A balanced split of the circuits over the phases, as a suggestion (it
+    changes nothing): what is set stays, the rest is spread by rated
+    current, a 2-pole RCD's circuits together. Propose each line with
+    set_phase() only if the person wants the split."""
+    return _get(_ws(workspace) + "/phase-plan")
 
 
 @server.tool()

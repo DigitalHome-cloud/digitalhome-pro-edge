@@ -11,6 +11,9 @@ from digitalhome_pro_edge import designs as dz
 from digitalhome_pro_edge import labels as lb
 
 
+CARDS = {"site": "https://portal.example", "home_id": "h-abcdefghjk"}
+
+
 @pytest.fixture
 def d(tmp_path):
     return dz.Designs(dz.WorkspaceKB(tmp_path))
@@ -58,7 +61,7 @@ def test_strips_follow_the_board_with_its_blanks_and_numbers(d, board):
     assert top == [("1 Licht", "1"), ("2 Steckdosen", "2"), ("FI 30 mA", "3–6")]
     low = [(c.get("title", "·"), lb.numbers(c)) for c in rows[1]["cells"]]
     assert low == [("Klingeltrafo 8 V", "7–8"), ("·", "9"), ("Herd", "10–12")]   # a blank cover at 9
-    page = lb.sheet(d.design(ws), "http://x/")
+    page = lb.sheet(d.design(ws), CARDS)
     assert "A4 landscape" in page and "position?" not in page
     assert page.count('class="cell narrow') == 2                # the 1-module breakers: upright text
 
@@ -70,9 +73,9 @@ def test_what_was_not_placed_fills_a_gap_and_says_so(d, board):
     cells = {c["item"]: c for row in rows for c in row["cells"] if not c.get("free")}
     assert cells[r]["placed"] and lb.numbers(cells[r]) == "1–4"
     assert not cells[c1]["placed"] and lb.numbers(cells[c1]) == "5"
-    page = lb.sheet(d.design(ws), "http://x/")
+    page = lb.sheet(d.design(ws), CARDS)
     assert "position?" in page and "without a position read on site" in page
-    grid = lb.sheet(d.design(ws), "http://x/", layout="grid")
+    grid = lb.sheet(d.design(ws), CARDS, layout="grid")
     assert "№ 1–4" in grid and "≈ № 5" in grid
 
 
@@ -90,4 +93,4 @@ def test_more_than_the_board_holds_goes_to_an_extra_strip(d):
         d.add_circuit(ws, board=b, label=f"C{i}", rated_current=16)
     rows = lb.strips(d.design(ws))
     assert [r["overflow"] for r in rows] == [False, True]
-    assert "not on the board yet" in lb.sheet(d.design(ws), "http://x/")
+    assert "not on the board yet" in lb.sheet(d.design(ws), CARDS)
