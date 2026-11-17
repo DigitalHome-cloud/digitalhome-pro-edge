@@ -28,6 +28,7 @@ from . import inbox as ib
 from . import labels as lb
 from . import partners as pt
 from . import configs as cf
+from . import fleet
 from . import revisions as rv
 from . import selection as sel
 from .core import server
@@ -140,7 +141,9 @@ def new_workspace():
     def make(title: str = "", home: str = "", country: str = "FR", connection: str = ""):
         home = (home or "").strip()
         name = hm.check(home, connection or None)
-        return designs().new_workspace(title, home, country, instance=name)
+        made = designs().new_workspace(title, home, country, instance=name)
+        fleet.soon()                         # the Portal's Fleet lists this edge's homes (ADR 0020)
+        return made
     return run(make, **fields("title", "home", "country", "connection"))
 
 
@@ -149,7 +152,9 @@ def attach_workspace(ws: str):
     def attach(home: str = "", connection: str = ""):
         home = (home or "").strip()
         name = hm.check(home, connection or None)
-        return designs().attach_workspace(ws, name, home)
+        done = designs().attach_workspace(ws, name, home)
+        fleet.soon()
+        return done
     return run(attach, **fields("home", "connection"))
 
 
@@ -637,6 +642,7 @@ def main(argv: list | None = None) -> int:
     kn.KnowledgeBase = dz.WorkspaceKB
     lines = [f"  {f['label'].lower():<13} {f['path']}" for f in ws.folders()]
     edge_routes.start_background()  # edge layer
+    fleet.start(designs, cloud, hm)    # kind and homes for the Portal's Fleet (ADR 0020)
     return server.serve(app, args, lines=lines)
 
 
