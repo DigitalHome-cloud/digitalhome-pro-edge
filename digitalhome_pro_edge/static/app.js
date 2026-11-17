@@ -45,10 +45,6 @@ async function select(ws, item) {
   S.ws = ws; S.item = item || null;
   history.replaceState(null, "", ws ? `#w=${encodeURIComponent(ws)}${item ? `&i=${encodeURIComponent(item)}` : ""}` : "#");
   try { await core.api("POST", "/api/selection", { workspace: ws || "", item: item || "" }); } catch (_) { /* fine */ }
-  $("#btn-labels").disabled = !ws;
-  const ex = $("#btn-export");
-  ex.hidden = !ws;
-  if (ws) ex.href = `/api/workspaces/${encodeURIComponent(ws)}/export.ttl`;
   S.seen = {};
   busy(refresh);
 }
@@ -636,6 +632,7 @@ async function drawFiles() {
   const box = $("#tab-files");
   box.innerHTML = `
     <p class="sub">${esc(t("f.intro"))}${S.wsTitle ? " " + esc(t("f.inWorkspace", { name: S.wsTitle })) : ""}</p>
+    ${S.ws ? `<p><a class="btn" download href="/api/workspaces/${encodeURIComponent(S.ws)}/export.ttl" data-help="help.export">${esc(t("toolbar.export"))}</a></p>` : ""}
     <label class="dropzone"><input type="file" multiple hidden>
       <span>${esc(t("f.drop"))}</span></label>
     ${got.length ? `<table class="files"><thead><tr><th>${esc(t("f.file"))}</th><th>${esc(t("f.what"))}</th><th>${esc(t("f.where"))}</th><th class="num">${esc(t("f.size"))}</th><th></th></tr></thead><tbody>
@@ -903,13 +900,83 @@ function wire() {
       select(got.workspace);
     } catch (err) { core.toast(failed(err)); }
   };
-  $("#btn-labels").onclick = () => S.ws && document.querySelector('.tabs button[data-tab="labels"]').click();
+  wireHelp();
+  wireSide();
   wireChatAttach();
   // a language switch redraws what this page drew; i18n.js does the rest
   window.i18n.onChange(() => { S.seen = {}; drawHomeChoice(); refresh(); });
   const h = hashState();
   select(h.ws, h.item);
   setInterval(() => { if (!document.hidden) refresh(); }, 4000);
+}
+
+// ---------------------------------------------- help and the side rail ----
+
+// A per-browser setting; private windows and blocked storage just forget it.
+const pref = (k, v) => {
+  try {
+    if (v === undefined) return localStorage.getItem(k);
+    localStorage.setItem(k, v);
+  } catch (_) { /* not kept */ }
+  return v === undefined ? null : v;
+};
+
+/** Hover help: [data-help] names a string; the switch in the header turns it on and off. */
+function wireHelp() {
+  const sw = $("#help-on");
+  const tip = $("#help-tip");
+  const theme = document.getElementById("core-theme");
+  if (theme && theme.closest("label")) theme.closest("label").dataset.help = "help.theme";
+  const chat = document.getElementById("edge-chat");
+  if (chat) chat.dataset.help = "help.chat";
+  const conn = document.getElementById("edge-connections");
+  if (conn) conn.dataset.help = "help.connections";
+  sw.checked = pref("dhc.pro.help") !== "off";
+  sw.onchange = () => { pref("dhc.pro.help", sw.checked ? "on" : "off"); hide(); };
+  let timer = null;
+  let over = null;
+  const hide = () => { clearTimeout(timer); timer = null; over = null; tip.hidden = true; };
+  const show = (el) => {
+    const text = t(el.dataset.help);
+    if (!text || text === el.dataset.help) return;
+    tip.textContent = text;
+    tip.hidden = false;
+    const r = el.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    const below = r.bottom + 8 + h < window.innerHeight;
+    tip.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+    tip.style.top = `${below ? r.bottom + 8 : Math.max(8, r.top - h - 8)}px`;
+  };
+  const enter = (e) => {
+    if (!sw.checked) return;
+    // the innermost element with help wins; a panel's help shows only on its heading area
+    const el = e.target.closest && e.target.closest("[data-help]");
+    if (!el || el === over) return;
+    hide();
+    over = el;
+    timer = setTimeout(() => show(el), 450);
+  };
+  document.addEventListener("mouseover", enter);
+  document.addEventListener("focusin", enter);
+  document.addEventListener("mouseout", (e) => { if (over && !over.contains(e.relatedTarget)) hide(); });
+  document.addEventListener("focusout", hide);
+  document.addEventListener("scroll", hide, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+}
+
+/** The left rail (homes and workspaces) hides and comes back; the choice is kept. */
+function wireSide() {
+  const btn = $("#btn-side");
+  const set = (shown) => {
+    document.body.classList.toggle("side-hidden", !shown);
+    btn.setAttribute("aria-pressed", String(shown));
+    btn.title = t(shown ? "toolbar.sideHide" : "toolbar.sideShow");
+    pref("dhc.pro.side", shown ? "shown" : "hidden");
+  };
+  set(pref("dhc.pro.side") !== "hidden");
+  btn.onclick = () => set(document.body.classList.contains("side-hidden"));
+  window.i18n.onChange(() => set(!document.body.classList.contains("side-hidden")));
 }
 
 // the strings first (i18n.json), then the page
