@@ -87,14 +87,14 @@ CABLE_OD = {
 CABLE_OVERLAP = 4.0                    # mm the blank half laps past the text
 
 DEFAULTS: Dict[str, Any] = {
-    "kind": "board",                   # board | cable | qr | tag
+    "kind": "board",                   # board | cable | qr | tag | blank
     "module_mm": MODULE_MM, "strip_h": STRIP_H, "font_pt": 7.5,
     "cable_h": 19.0, "cable_d": 0.0,   # 0: estimated per circuit
     "tag_mm": 20.0,                    # the QR of a small tag, square
     "show_symbol": True, "show_phase": True, "show_number": True,
     "skip": 0, "boards": [], "items": [],
 }
-_LAYOUT = {"board": "strip", "qr": "grid", "cable": "cable", "tag": "tag", "strip": "strip", "grid": "grid"}
+_LAYOUT = {"board": "strip", "qr": "grid", "cable": "cable", "tag": "tag", "blank": "blank", "strip": "strip", "grid": "grid"}
 
 
 def settings_path(folder: Path) -> Path:
@@ -113,7 +113,7 @@ def clean_settings(s: Dict[str, Any]) -> Dict[str, Any]:
     """The settings, checked: numbers in range, kinds known, lists of ids."""
     out = dict(DEFAULTS)
     try:
-        out["kind"] = s.get("kind") if s.get("kind") in ("board", "cable", "qr", "tag") else "board"
+        out["kind"] = s.get("kind") if s.get("kind") in ("board", "cable", "qr", "tag", "blank") else "board"
         for k, lo, hi in (("module_mm", 9, 27), ("strip_h", 10, 60), ("font_pt", 5, 14),
                           ("cable_h", 9, 40), ("cable_d", 0, 40), ("tag_mm", 12, 30)):
             v = float(s.get(k, DEFAULTS[k]))
@@ -147,6 +147,12 @@ def card_url(site: str, home_id: str, item: str) -> str:
     """The item's ID card in the Portal."""
     q = urllib.parse.urlencode({"h": home_id, "i": item})
     return f"{site.rstrip('/')}/id/?{q}"
+
+
+def blank_url(site: str, tag: str) -> str:
+    """A blank tag's page in the Portal: bound on site to the item it is on
+    (ADR 0018 point 10). Only the tag id is in the code."""
+    return f"{site.rstrip('/')}/id/?{urllib.parse.urlencode({'t': tag})}"
 
 
 def _card(cards: Optional[Dict], item: str) -> str:
@@ -516,7 +522,8 @@ def _only(design: Dict, s: Dict) -> Dict:
 
 
 def sheet(design: Dict, cards: Optional[Dict] = None, layout: str = "strip", skip: int = 0,
-          module_mm: float = MODULE_MM, height: Optional[float] = None, settings: Optional[Dict] = None) -> str:
+          module_mm: float = MODULE_MM, height: Optional[float] = None, settings: Optional[Dict] = None,
+          blanks: Optional[List[Dict]] = None) -> str:
     """The printable A4 sheets as a standalone HTML page. `cards`: {site,
     home_id} for the QR codes, or None when the workspace has no home in the
     cloud (then no codes). `settings` (the wizard's, see DEFAULTS) wins over
@@ -532,6 +539,8 @@ def sheet(design: Dict, cards: Optional[Dict] = None, layout: str = "strip", ski
         return _cable_sheets(view, title, s)
     if kind == "tag":
         return _tag_sheets(design, cards, title, s)
+    if kind == "blank":
+        return _blank_sheets(blanks or [], cards, title, s)
     return _grid_sheets(view, cards, title, s["skip"], s["module_mm"], s["strip_h"])
 
 
@@ -615,6 +624,37 @@ def _tag_sheets(design: Dict, cards: Optional[Dict], title: str, s: Dict) -> str
     note = NO_CARDS if not cards else ("" if tags else "Nothing to tag: the design has no sockets, switches, "
                                                          "devices or circuits yet, or none is picked in the wizard")
     return _page(title, "".join(out), _controls("tag", s["skip"], s["module_mm"], s["strip_h"], len(tags), len(pages),
+                                                note), css)
+
+
+def _blank_sheets(blanks: List[Dict], cards: Optional[Dict], title: str, s: Dict) -> str:
+    """Blank survey tags: the same small tag, its code naming only a tag id,
+    with a serial (T-07) to count a sheet by. `blanks`: [{tagId, n}]."""
+    q = s["tag_mm"]
+    w, h = q + 4, q + 9
+    per = max(1, int((PAGE_W - 2 * MARGIN) // w)) * max(1, int((PAGE_H - 2 * MARGIN) // h))
+    cells: List[Optional[Dict]] = [None] * min(s["skip"], per - 1) + list(blanks)
+    pages = [cells[i:i + per] for i in range(0, len(cells), per)] or [[]]
+    out = []
+    for page in pages:
+        divs = []
+        for t in page:
+            if t is None:
+                divs.append('<div class="tag used"></div>')
+                continue
+            url = blank_url(cards["site"], t["tagId"]) if cards else ""
+            divs.append('<div class="tag">'
+                        + (f'<div class="code">{qr_svg(url)}</div>' if url else '<div class="code none">no code</div>')
+                        + f'<b>T-{int(t["n"]):02d}</b></div>')
+        out.append(f'<section class="sheet"><div class="tags">{"".join(divs)}</div></section>')
+    css = f""".tags {{ display: grid; grid-template-columns: repeat(auto-fill, {w}mm); grid-auto-rows: {h}mm; }}
+ .tag {{ border: 0.2mm dashed #999; padding: 1mm 2mm; display: flex; flex-direction: column; align-items: center; overflow: hidden; }}
+ .tag.used {{ border-color: #eee; }}
+ .tag .code svg {{ width: {q}mm; height: {q}mm; display: block; }}
+ .tag .none {{ width: {q}mm; height: {q}mm; display: flex; align-items: center; justify-content: center; color: #b00; font-size: 6pt; }}
+ .tag b {{ font-size: 7pt; letter-spacing: 0.04em; }}"""
+    note = NO_CARDS if not cards else ("" if blanks else "No blank tags yet: mint some in the wizard's first step")
+    return _page(title, "".join(out), _controls("tag", s["skip"], s["module_mm"], s["strip_h"], len(blanks), len(pages),
                                                 note), css)
 
 

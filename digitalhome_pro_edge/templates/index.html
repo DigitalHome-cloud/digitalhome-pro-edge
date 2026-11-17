@@ -16,12 +16,12 @@
 {% block brand %}<span class="brand">digitalhome<span class="tld">.pro</span></span>{% endblock %}
 
 {% block toolbar %}
-  <button id="btn-labels" disabled title="print a label for every device on the boards" data-i18n="toolbar.labels" data-i18n-title="toolbar.labelsTitle">Labels</button>
-  <a id="btn-export" class="btn" hidden download data-i18n="toolbar.export">Export .ttl</a>
+  <button id="btn-side" class="side-btn" aria-pressed="true" aria-controls="side" data-help="help.side">☰</button>
 {% endblock %}
 
 {% block toolbar_end %}
-  <label class="toggle"><span data-i18n="lang.label">language</span>
+  <label class="toggle" data-help="help.help"><input type="checkbox" id="help-on"> <span data-i18n="help.label">help</span></label>
+  <label class="toggle" data-help="help.lang"><span data-i18n="lang.label">language</span>
     <select id="lang-pick">
       <option value="en">EN</option>
       <option value="de">DE</option>
@@ -33,11 +33,11 @@
 {% block main %}
 <main class="layout">
 
-  <aside class="side">
-    <h3 data-i18n="side.title">Homes and workspaces</h3>
+  <aside class="side" id="side">
+    <h3 data-i18n="side.title" data-help="help.homes">Homes and workspaces</h3>
     <div id="ws-list" class="ws-list"><p class="note" data-i18n="side.loading">loading…</p></div>
     <details class="new-ws">
-      <summary data-i18n="side.new">New workspace</summary>
+      <summary data-i18n="side.new" data-help="help.new">New workspace</summary>
       <label><span data-i18n="side.project">Project</span> <input id="nw-title" placeholder="e.g. New switchboard" data-i18n-placeholder="side.projectPh"></label>
       <label><span data-i18n="side.home">Home</span> <select id="nw-home"></select></label>
       <p id="nw-home-why" class="note" hidden></p>
@@ -49,13 +49,13 @@
 
   <section class="work">
     <nav class="tabs" role="tablist">
-      <button data-tab="design" class="is-on" data-i18n="tab.design">Design</button>
-      <button data-tab="report" data-i18n="tab.report">Report</button>
-      <button data-tab="bom" data-i18n="tab.bom">Materials</button>
-      <button data-tab="labels" data-i18n="tab.labels">Labels</button>
-      <button data-tab="history" data-i18n="tab.history">History</button>
-      <button data-tab="partners" data-i18n="tab.partners">Partners</button>
-      <button data-tab="files" data-i18n="tab.files">Files</button>
+      <button data-tab="design" class="is-on" data-i18n="tab.design" data-help="help.design">Design</button>
+      <button data-tab="report" data-i18n="tab.report" data-help="help.report">Report</button>
+      <button data-tab="bom" data-i18n="tab.bom" data-help="help.bom">Materials</button>
+      <button data-tab="labels" data-i18n="tab.labels" data-help="help.labels">Labels</button>
+      <button data-tab="history" data-i18n="tab.history" data-help="help.history">History</button>
+      <button data-tab="partners" data-i18n="tab.partners" data-help="help.partners">Partners</button>
+      <button data-tab="files" data-i18n="tab.files" data-help="help.files">Files</button>
     </nav>
     <div id="tab-design" class="tab"><p class="note" data-i18n="design.choose">Choose or start a workspace.</p></div>
     <div id="tab-report" class="tab" hidden></div>
@@ -69,6 +69,7 @@
   <section id="edge-connections" class="panel"></section>  <!-- edge layer -->
   <section id="edge-chat" class="panel"></section>
 </main>
+<div id="help-tip" class="help-tip" role="tooltip" hidden></div>
 <div id="busy" class="busy" hidden role="status" aria-live="polite"><div class="busy__spin"></div><span data-i18n="busy">loading…</span></div>
 {% endblock %}
 

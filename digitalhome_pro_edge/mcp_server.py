@@ -559,6 +559,32 @@ def tag_vault_items(workspace: str, add: list[str] | None = None, remove: list[s
 
 
 @server.tool()
+def observations(workspace: str) -> dict:
+    """What was filed on site from a phone (the ID card's survey block):
+    photos and notes, each with the item it shows, its kind, room and
+    note, newest first. new=True: an observation of something the design
+    does not have yet (item obs-…). Propose what each implies (a point on a
+    circuit in a room, a corrected label or rating), one at a time; once the
+    person confirms and the item exists, adopt_observation()."""
+    return _get(_ws(workspace) + "/observations")
+
+
+@server.tool()
+def adopt_observation(workspace: str, observation: str, item: str) -> dict:
+    """The design now has the item an observation (obs-…) stood for: its
+    photos are filed under the item, and its blank tag opens the item's card."""
+    return act(f"File observation {observation} under {item} in {workspace}", "POST",
+               _ws(workspace) + "/observations/adopt", {"observation": observation, "item": item})
+
+
+@server.tool()
+def mint_blank_tags(workspace: str, count: int = 24) -> dict:
+    """Mint blank QR tags for the home's site survey (1 to 200); print them
+    in the label wizard as "Blank survey tags"."""
+    return act(f"Mint {count} blank QR tags for {workspace}", "POST", _ws(workspace) + "/labels/blank", {"count": count})
+
+
+@server.tool()
 def vault(workspace: str, config_version: str = "") -> dict:
     """The home's vault: photos and documents, each with the configuration
     versions or options it documents (its tags); config_version filters."""

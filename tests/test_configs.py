@@ -66,7 +66,7 @@ class FakeCloud:
             before = self.versions[-1]
             return {"status": "ok", "id": before["id"], "version": before["version"], "summary": "withdrew"}
         if route == "items":
-            items = [{"sha256": s, "name": v["name"], "tags": v.setdefault("tags", [v["configVersion"]] if v.get("configVersion") else [])}
+            items = [{"sha256": s, "name": v["name"], "caption": v.get("caption"), "tags": v.setdefault("tags", [v["configVersion"]] if v.get("configVersion") else [])}
                      for s, v in self.vault.items()]
             return {"homeId": HID, "items": [i for i in items if not body.get("tag") or body["tag"] in i["tags"]]}
         if route == "tag":
@@ -83,6 +83,15 @@ class FakeCloud:
                 out.append({"sha256": f["sha256"], "name": f["name"], "status": st,
                             **({} if body["dryRun"] or st == "known" else {"url": "put:" + f["sha256"], "headers": {}})})
             return {"files": out}
+        if route == "tags":                                              # blank QR tags (ADR 0018 point 10)
+            self.tags = getattr(self, "tags", {})
+            minted = [f"t-{c * 10}" for c in "mnpqrstuvwxyz"[len(self.tags):len(self.tags) + body["count"]]]
+            for t in minted:
+                self.tags[t] = None
+            return {"homeId": HID, "tags": minted}
+        if route == "tag-bind":
+            self.tags[body["tagId"]] = body["item"]
+            return {"tagId": body["tagId"], "homeId": HID, "item": body["item"]}
         if route == "commit":
             assert self.objects.pop("put:" + body["sha256"])
             self.vault[body["sha256"]] = body
@@ -214,3 +223,37 @@ def test_vault_items_are_tagged_several_at_once(d, fake):
         c.vault_tag(ws, items=["c.jpg"], add=["0001-0000"])
     with pytest.raises(cf.ConfigError, match="which tags"):
         c.vault_tag(ws, items=["a.jpg"])
+
+
+def test_blank_tags_are_minted_numbered_on_and_an_observation_is_adopted(d, fake):
+    ws, b = survey(d)
+    c = cf.Configs(d)
+    c.publish_first_live(ws)
+    assert [t["n"] for t in c.mint_tags(ws, 2)["tags"]] == [1, 2]
+    second = c.mint_tags(ws, 3)["tags"]
+    assert [t["n"] for t in second] == [3, 4, 5]                         # numbered on: a sheet can be counted
+    assert len(c.blank_tags(ws)["batches"]) == 2
+    with pytest.raises(cf.ConfigError, match="1 to 200"):
+        c.mint_tags(ws, 0)
+    # on site, the phone filed a photo of a socket the design does not have
+    obs = f"obs-{second[0]['tagId'][2:]}"
+    fake.vault["c" * 64] = {"name": "survey-1.jpg", "caption": "socket by the door",
+                            "tags": [f"{HID}-0001-0000", "survey", f"item:{obs}", "kind:socket", "room:Hall"]}
+    seen = c.observations(ws)["observations"]
+    assert seen[0]["new"] and seen[0]["kind"] == "socket" and seen[0]["room"] == "Hall"
+    assert seen[0]["tag"] == second[0]["tagId"] and seen[0]["note"] == "socket by the door"
+    item = next(i for i in c._design_ids(ws) if i.startswith("circuit-"))
+    r = c.adopt_observation(ws, obs, item)
+    assert r["photos"] == 1 and fake.tags[second[0]["tagId"]] == item
+    assert f"item:{item}" in fake.vault["c" * 64]["tags"] and f"item:{obs}" not in fake.vault["c" * 64]["tags"]
+    with pytest.raises(cf.ConfigError, match="no item"):
+        c.adopt_observation(ws, obs, "point-nothere1")
+
+
+def test_survey_tags_are_not_taken_for_short_version_ids(d, fake):
+    ws, _ = survey(d)
+    c = cf.Configs(d)
+    c.publish_first_live(ws)
+    fake.vault["d" * 64] = {"name": "x.jpg", "tags": []}
+    c.vault_tag(ws, items=["x.jpg"], add=["survey", "item:point-abcdefgh", "0001-0000"])
+    assert fake.vault["d" * 64]["tags"] == sorted(["survey", "item:point-abcdefgh", f"{HID}-0001-0000"])
