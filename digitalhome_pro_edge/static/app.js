@@ -707,8 +707,12 @@ async function drawLabels(force = false) {
   let body = "";
   if (step === "what") {
     body = `<fieldset class="lw-kind"><legend>${esc(t("lw.kindQ"))}</legend>
-        ${["board", "cable", "qr", "tag"].map((k) => `<label class="lw-card ${s.kind === k ? "is-on" : ""}"><input type="radio" name="kind" value="${k}" ${s.kind === k ? "checked" : ""}>
+        ${["board", "cable", "qr", "tag", "blank"].map((k) => `<label class="lw-card ${s.kind === k ? "is-on" : ""}"><input type="radio" name="kind" value="${k}" ${s.kind === k ? "checked" : ""}>
           <b>${esc(t(`lw.k.${k}`))}</b><small>${esc(t(`lw.k.${k}Hint`))}</small></label>`).join("")}</fieldset>
+      ${s.kind === "blank" ? `<fieldset class="lw-blank"><legend>${esc(t("lw.blankQ"))}</legend>
+        <p class="note">${esc(t("lw.blankHave", { n: d.blank }))}</p>
+        <label class="lw-num">${esc(t("lw.blankMint"))} <input type="number" class="lw-blank-n" min="1" max="200" value="24"></label>
+        <button class="primary lw-blank-go" ${d.cards ? "" : "disabled"}>${esc(t("lw.blankGo"))}</button></fieldset>` : ""}
       ${d.cards ? `<p class="note">${esc(t("lw.cardsTo", { site: d.cards.site.replace(/^https?:\/\//, "") }))}</p>`
         : `<div class="finding warning"><b>${esc(t("lw.noCardsTitle"))}</b>${esc(t("lw.noCards"))}</div>`}
       <fieldset><legend>${esc(t("lw.boards"))}</legend>
@@ -767,7 +771,7 @@ async function drawLabels(force = false) {
   } else {
     const open = d.labels.filter((l) => l.warnings.some((w) => ["too_long", "no_phase", "duplicate"].includes(w.code)));
     const src = `/workspaces/${wsq}/labels?_=${S.lprint || 0}`;
-    body = `${["qr", "tag"].includes(s.kind) ? `<p class="note">${esc(t("lw.pushNote"))}</p>` : ""}
+    body = `${["qr", "tag", "blank"].includes(s.kind) ? `<p class="note">${esc(t("lw.pushNote"))}</p>` : ""}
       ${open.length ? `<div class="finding warning"><b>${esc(t("lw.stillOpen", { n: open.length }))}</b>
         ${open.slice(0, 6).map((l) => esc(`${l.number || "—"} ${l.title}: ${l.warnings.map((w) => w.text).join("; ")}`)).join("<br>")}</div>` : ""}
       <div class="lw-bar"><button class="primary lw-print">${esc(t("lw.printBtn"))}</button>
@@ -785,6 +789,13 @@ async function drawLabels(force = false) {
   const prev = box.querySelector(".lw-prev"); if (prev) prev.onclick = () => go(LSTEPS[i - 1]);
   const next = box.querySelector(".lw-next"); if (next) next.onclick = () => go(LSTEPS[i + 1]);
   box.querySelectorAll("input[name=kind]").forEach((r) => r.onchange = () => save({ kind: r.value }));
+  const mint = box.querySelector(".lw-blank-go");
+  if (mint) mint.onclick = async () => {
+    const n = Number(box.querySelector(".lw-blank-n").value || 0);
+    try { await busy(core.api("POST", `/api/workspaces/${wsq}/labels/blank`, { count: n })); core.toast(t("lw.blankDone", { n })); }
+    catch (err) { core.toast(failed(err)); }
+    S.seen.labels = null; return busy(() => drawLabels(true));
+  };
   const boardsBox = box.querySelectorAll(".lw-board");
   boardsBox.forEach((c) => c.onchange = () => {
     const on = [...boardsBox].filter((x) => x.checked).map((x) => x.value);

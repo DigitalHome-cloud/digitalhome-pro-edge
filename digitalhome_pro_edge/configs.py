@@ -31,6 +31,8 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import re
+from datetime import datetime, timezone
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -44,6 +46,11 @@ from .edge import cloud
 
 HOME_ID_PREFIX = "h-"
 MAX_FILES = 100
+# what a survey photo shows (ADR 0018 point 10): a vault tag that is not a version
+SUBJECT_TAG = re.compile(r"^(survey|(item|kind|room):.+)$")
+TAG_ID = re.compile(r"^t-[abcdefghjkmnpqrstuvwxyz23456789]{10}$")
+BLANK_FILE = "blank-tags.json"            # the workspace's minted blank tags (runtime data, never committed)
+MAX_MINT = 200
 
 
 class ConfigError(ValueError):
@@ -320,7 +327,7 @@ class Configs:
         short for this home's) on several vault items at once. `items`: their
         names or SHA-256s; none means every item."""
         home = self.home_id(ws)
-        full = lambda t: t if str(t).startswith(home) else f"{home}-{t}"  # noqa: E731
+        full = lambda t: t if str(t).startswith(home) or SUBJECT_TAG.match(str(t)) else f"{home}-{t}"  # noqa: E731
         add = [full(t) for t in (add or []) if str(t).strip()]
         remove = [full(t) for t in (remove or []) if str(t).strip()]
         if not add and not remove:
@@ -336,6 +343,77 @@ class Configs:
         r = self._vault(ws, "tag", {"sha256s": [i["sha256"] for i in picked], "add": add, "remove": remove})
         names = {i["sha256"]: i["name"] for i in picked}
         return {"status": r.get("status"), "items": [{"name": names.get(x["sha256"]), **x} for x in r.get("items", [])]}
+
+    # ------------------------------------------------- the site survey (point 10)
+
+    def _blank_path(self, ws: str) -> Path:
+        return self.d.kb.folder(ws) / BLANK_FILE
+
+    def blank_tags(self, ws: str) -> Dict[str, Any]:
+        """The blank tags minted for this workspace's home, in batches, newest last."""
+        p = self._blank_path(ws)
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        return {"batches": data.get("batches", [])}
+
+    def mint_tags(self, ws: str, count: int) -> Dict[str, Any]:
+        """Mint `count` blank QR tags for the home in the cloud and keep them
+        here, numbered on from the last batch, so a sheet can be printed again
+        without minting again."""
+        n = int(count)
+        if not 1 <= n <= MAX_MINT:
+            raise ConfigError(f"mint 1 to {MAX_MINT} tags at a time")
+        got = self._call(ws, "tags", {"count": n})
+        tags = [t for t in got.get("tags", []) if TAG_ID.match(str(t))]
+        have = self.blank_tags(ws)["batches"]
+        first = 1 + sum(len(b["tags"]) for b in have)
+        batch = {"mintedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                 "tags": [{"tagId": t, "n": first + k} for k, t in enumerate(tags)]}
+        p = self._blank_path(ws)
+        p.write_text(json.dumps({"batches": have + [batch]}, ensure_ascii=False, indent=1), encoding="utf-8")
+        return batch
+
+    def bind_tag(self, ws: str, tag: str, item: str = "") -> Dict[str, Any]:
+        """Bind a blank tag of this home to an item (or unbind it)."""
+        if not TAG_ID.match(str(tag)):
+            raise ConfigError("a tag id looks like t- and ten letters or digits")
+        return self._call(ws, "tag-bind", {"tagId": tag, "item": item or None})
+
+    def observations(self, ws: str) -> Dict[str, Any]:
+        """What the phone filed on site: the vault items tagged `survey`, each
+        with the item it shows (an observation obs-… is something the design
+        does not have yet), its kind, room and note, newest first."""
+        got = self._vault(ws, "items", {"tag": "survey"}).get("items", [])
+        known = self._design_ids(ws)
+        out = []
+        for i in got:
+            tags = i.get("tags") or []
+            pick = lambda key: next((t.split(":", 1)[1] for t in tags if t.startswith(f"{key}:")), "")  # noqa: E731
+            item = pick("item")
+            out.append({"sha256": i["sha256"], "name": i.get("name"), "kind": pick("kind"), "room": pick("room"),
+                        "item": item, "note": i.get("caption") or "", "uploadedAt": i.get("uploadedAt"),
+                        "new": item.startswith("obs-"), "in_design": item in known,
+                        "tag": f"t-{item[4:]}" if item.startswith("obs-") else ""})
+        out.sort(key=lambda o: str(o["uploadedAt"]), reverse=True)
+        return {"observations": out}
+
+    def _design_ids(self, ws: str) -> set:
+        g = self.d.kb.load(ws)
+        return {str(s).rstrip("/").rsplit("/", 1)[-1] for s in g.subjects()}
+
+    def adopt_observation(self, ws: str, observation: str, item: str) -> Dict[str, Any]:
+        """The chat made the design item an observation stood for (the person
+        confirmed it): its photos move to item:<item>, and its tag follows."""
+        if not observation.startswith("obs-"):
+            raise ConfigError("an observation id starts with obs-")
+        if item not in self._design_ids(ws):
+            raise ConfigError(f"no item {item} in this design")
+        shas = [i["sha256"] for i in self._vault(ws, "items", {"tag": f"item:{observation}"}).get("items", [])]
+        moved = self._vault(ws, "tag", {"sha256s": shas, "add": [f"item:{item}"], "remove": [f"item:{observation}"]}) if shas else {}
+        tag = self.bind_tag(ws, f"t-{observation[4:]}", item)
+        return {"photos": len(shas), "tag": tag, "items": moved.get("items", [])}
 
 
 def as_json(x: Any) -> str:

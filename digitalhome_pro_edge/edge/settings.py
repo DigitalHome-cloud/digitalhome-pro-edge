@@ -78,6 +78,9 @@ CHAT_ALLOWED: List[Tuple[str, str]] = [
     # the home's configurations and vault (ADR-0010): publish, promote and withdraw only as proposals a person confirms
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/configuration/(option|pull|push|publish|promote|withdraw)"),
     ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/vault/(upload|tag)"),
+    # the site survey (ADR 0018 point 10): blank tags, and an observation the design now has
+    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/labels/blank"),
+    ("POST", r"/api/workspaces/[a-z][a-z0-9-]{0,39}/observations/adopt"),
     ("POST", r"/api/partners"),
     ("POST", r"/api/market/(subscribe|sync)"),
     ("POST", r"/api/partners/[a-z][a-z0-9-]{0,39}/article"),

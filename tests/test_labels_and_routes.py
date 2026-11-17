@@ -203,3 +203,14 @@ def test_switching_connection_shows_that_clouds_homes(client, monkeypatch):
     current["name"] = "prod"
     got = client.get("/api/cloud-homes").get_json()
     assert got["homes"][0]["smartHomeId"] == "prod-home" and got["connection"] == "prod"
+
+
+def test_a_blank_sheet_holds_only_tag_ids_and_counts_them():
+    from digitalhome_pro_edge import labels as lb
+    blanks = [{"tagId": f"t-{c * 10}", "n": i + 1} for i, c in enumerate("mnp")]
+    page = lb.sheet({"title": "Invented", "boards": []}, {"site": "https://portal.example.test", "home_id": "h-abcdefghjk"},
+                    settings={"kind": "blank"}, blanks=blanks)
+    assert page.count('class="tag"') == 3 and "T-01" in page and "T-03" in page
+    assert lb.blank_url("https://portal.example.test/", "t-mmmmmmmmmm") == "https://portal.example.test/id/?t=t-mmmmmmmmmm"
+    assert "h-abcdefghjk" not in page                                   # no home, no item: the tag is bound on site
+    assert "mint some" in lb.sheet({"title": "x", "boards": []}, {"site": "s", "home_id": "h"}, settings={"kind": "blank"})

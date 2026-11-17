@@ -275,6 +275,22 @@ def vault_tag(ws: str):
     return run(configs().vault_tag, ws, **fields("items", "add", "remove"))
 
 
+@app.post("/api/workspaces/<ws>/labels/blank")
+def mint_blank_tags(ws: str):
+    # blank QR tags for the site survey (ADR 0018 point 10), minted in the cloud
+    return run(configs().mint_tags, ws, **fields("count"))
+
+
+@app.get("/api/workspaces/<ws>/observations")
+def observations(ws: str):
+    return run(configs().observations, ws)
+
+
+@app.post("/api/workspaces/<ws>/observations/adopt")
+def adopt_observation(ws: str):
+    return run(configs().adopt_observation, ws, **fields("observation", "item"))
+
+
 @app.get("/api/workspaces/<ws>/vault")
 def vault_items(ws: str):
     return run(configs().vault_items, ws, request.args.get("configVersion", ""))
@@ -306,7 +322,8 @@ def labels(ws: str):
         s = lb.clean_settings(s)
     except ValueError:
         abort(400, "skip, module and height are numbers: module 9 to 27 mm, height 10 to 60 mm")
-    resp = app.response_class(lb.sheet(d, _cards(ws), settings=s), mimetype="text/html")
+    blanks = [t for b in configs().blank_tags(ws)["batches"] for t in b["tags"]] if s["kind"] == "blank" else None
+    resp = app.response_class(lb.sheet(d, _cards(ws), settings=s, blanks=blanks), mimetype="text/html")
     # the Labels tab previews this page in a frame: its own origin only (the layer denies framing otherwise)
     resp.headers["X-Frame-Options"] = "SAMEORIGIN"
     resp.headers["Content-Security-Policy"] = "frame-ancestors 'self'; base-uri 'none'; object-src 'none'"
@@ -332,7 +349,8 @@ def _label_draft(ws: str) -> dict:
     return {"workspace": ws, "supply": d["supply"], "supply_set": d["supply_set"], "settings": s,
             "cards": cards, "boards": [{"id": b["id"], "label": b["label"], "tag": b.get("label_short", "")}
                                        for b in d["boards"]],
-            "labels": lb.warnings(d, s, cards), "cables": lb.cable_labels(d, s)}
+            "labels": lb.warnings(d, s, cards), "cables": lb.cable_labels(d, s),
+            "blank": sum(len(b["tags"]) for b in configs().blank_tags(ws)["batches"])}
 
 
 @app.get("/api/workspaces/<ws>/labels")
